@@ -1,7 +1,7 @@
 import React from 'react';
 import { Menu, MessageCircle, LogIn } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { PageTab } from '../types/community';
+import { DEFAULT_KAKAO_CHAT_URL, PageTab } from '../types/community';
 
 const TAB_LABELS: Record<PageTab, string> = {
   home: '홈 · 원우회 소개',
@@ -15,11 +15,13 @@ const TAB_LABELS: Record<PageTab, string> = {
 
 export function TopBreadcrumbBar({
   activeTab,
+  kakaoChatUrl = DEFAULT_KAKAO_CHAT_URL,
   onSelectTab,
   onOpenMobileSidebar,
   onOpenApplicationModal,
 }: {
   activeTab: PageTab;
+  kakaoChatUrl?: string;
   onSelectTab: (tab: PageTab) => void;
   onOpenMobileSidebar: () => void;
   onOpenApplicationModal: () => void;
@@ -108,14 +110,15 @@ export function TopBreadcrumbBar({
             원우 인증 로그인
           </button>
         ) : isApprovedMember ? (
-          <button
-            type="button"
-            onClick={() => onSelectTab('kakao')}
+          <a
+            href={kakaoChatUrl}
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-stone-900 bg-[#FEE500] hover:bg-[#F5DC00] border border-[#E5CE00] rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <MessageCircle className="w-3.5 h-3.5" />
             카카오톡 채팅방
-          </button>
+          </a>
         ) : (
           <button
             type="button"

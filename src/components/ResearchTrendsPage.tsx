@@ -27,6 +27,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
+  formatAdmissionTerm,
   LIMITS,
   PageTab,
   ResearchComment,
@@ -279,7 +280,7 @@ export function ResearchTrendsPage({
               0,
               LIMITS.displayName
             ),
-            authorCohort: (profile?.cohort || '원우회원').slice(0, LIMITS.cohort),
+            authorCohort: formatAdmissionTerm(profile?.cohort || '원우회원').slice(0, LIMITS.cohort),
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
@@ -337,7 +338,7 @@ export function ResearchTrendsPage({
           0,
           LIMITS.displayName
         ),
-        authorCohort: (profile?.cohort || '원우회원').slice(0, LIMITS.cohort),
+        authorCohort: formatAdmissionTerm(profile?.cohort || '원우회원').slice(0, LIMITS.cohort),
         content: commentInput.trim().slice(0, LIMITS.commentContent),
         createdAt: serverTimestamp(),
       });
@@ -513,7 +514,7 @@ export function ResearchTrendsPage({
 
                 <div className="mt-auto pt-3 border-t border-stone-100 flex items-center justify-between text-xs text-stone-500">
                   <span>
-                    공유: {trend.authorName} ({trend.authorCohort})
+                    공유: {trend.authorName} ({formatAdmissionTerm(trend.authorCohort)})
                   </span>
                   {trend.externalUrl && (
                     <span className="inline-flex items-center gap-1 text-[#002968] font-medium">
@@ -779,7 +780,7 @@ export function ResearchTrendsPage({
             </h2>
 
             <p className="text-xs text-stone-500 mb-5">
-              공유자: {selectedTrend.authorName} ({selectedTrend.authorCohort}) ·{' '}
+              공유자: {selectedTrend.authorName} ({formatAdmissionTerm(selectedTrend.authorCohort)}) ·{' '}
               <span className="font-mono tabular-nums">
                 {formatKoreanDateTime(selectedTrend.createdAt)}
               </span>
@@ -839,7 +840,7 @@ export function ResearchTrendsPage({
                           <div className="text-xs text-stone-600">
                             <span className="font-semibold text-stone-900">{c.authorName}</span>
                             <span className="mx-1.5 text-stone-400">·</span>
-                            <span>{c.authorCohort}</span>
+                            <span>{formatAdmissionTerm(c.authorCohort)}</span>
                             <span className="mx-1.5 text-stone-400">·</span>
                             <span className="font-mono tabular-nums text-stone-500">
                               {formatKoreanDateTime(c.createdAt)}

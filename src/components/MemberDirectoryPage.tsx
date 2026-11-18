@@ -3,7 +3,7 @@ import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { Search, UserCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { DegreeProgram, MemberPublic, PageTab } from '../types/community';
+import { DegreeProgram, formatAdmissionTerm, MemberPublic, PageTab } from '../types/community';
 import { MemberAccessGate } from './NotionPrimitives';
 
 const PROGRAMS: ('전체' | DegreeProgram)[] = [
@@ -54,7 +54,7 @@ export function MemberDirectoryPage({
         const q = search.trim().toLowerCase();
         return (
           m.displayName.toLowerCase().includes(q) ||
-          m.cohort.toLowerCase().includes(q) ||
+          formatAdmissionTerm(m.cohort).toLowerCase().includes(q) ||
           m.roleTitle.toLowerCase().includes(q) ||
           (m.researchInterest || '').toLowerCase().includes(q)
         );
@@ -67,7 +67,7 @@ export function MemberDirectoryPage({
     return (
       <MemberAccessGate
         sectionTitle="원우 네트워크 디렉토리"
-        description="승인된 원우들의 기수, 학위과정, 관심 연구 분야 목록은 원우회원만 열람할 수 있습니다."
+        description="승인된 원우들의 입학년도/입학학기, 학위과정, 관심 연구 분야 목록은 원우회원만 열람할 수 있습니다."
         onOpenApplicationModal={onOpenApplicationModal}
         onNavigate={onNavigate}
       />
@@ -120,7 +120,7 @@ export function MemberDirectoryPage({
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="이름, 기수, 연구 분야 검색"
+            placeholder="이름, 입학년도/학기, 연구 분야 검색"
             className="w-full pl-8 pr-3 py-1.5 text-xs border border-stone-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-[#002968]/20 focus:border-[#002968]"
           />
         </div>
@@ -143,7 +143,7 @@ export function MemberDirectoryPage({
                 <th className="py-3 px-4">이름</th>
                 <th className="py-3 px-4">원우회 직책</th>
                 <th className="py-3 px-4">과정 · 상태</th>
-                <th className="py-3 px-4">입학 기수</th>
+                <th className="py-3 px-4">입학년도 / 학기</th>
                 <th className="py-3 px-4">관심 연구 분야</th>
               </tr>
             </thead>
@@ -163,7 +163,7 @@ export function MemberDirectoryPage({
                     {m.program} · {m.academicStatus}
                   </td>
                   <td className="py-3 px-4 text-xs font-mono tabular-nums text-stone-600 whitespace-nowrap">
-                    {m.cohort}
+                    {formatAdmissionTerm(m.cohort)}
                   </td>
                   <td className="py-3 px-4 text-xs text-stone-600">
                     {m.researchInterest || '미입력'}

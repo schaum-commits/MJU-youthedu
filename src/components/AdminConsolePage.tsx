@@ -48,12 +48,14 @@ import {
   CommunityLinks,
   CouncilActivity,
   COVER_IMAGE_URL,
+  formatAdmissionTerm,
   LIMITS,
   MemberPublic,
   MembershipStatus,
   PublicSettings,
   ResearchComment,
   ResearchTrend,
+  resolveKakaoChatUrl,
   TrendCategory,
   UserProfile,
 } from '../types/community';
@@ -227,11 +229,16 @@ export function AdminConsolePage({
         if (snap.exists()) {
           const data = snap.data() as CommunityLinks;
           setMainChatTitle(data.mainChatTitle || '');
-          setMainChatUrl(data.mainChatUrl || '');
+          setMainChatUrl(resolveKakaoChatUrl(data.mainChatUrl));
           setMainChatPasscode(data.mainChatPasscode || '');
           setStudyChatTitle(data.studyChatTitle || '');
           setStudyChatUrl(data.studyChatUrl || '');
-          setRoomRules(data.roomRules || '');
+          setRoomRules(
+            (data.roomRules || '').replace(
+              /\[(?:기수|입학년도\/학기)\/과정\/이름\]/g,
+              '[입학년도/과정/이름]'
+            )
+          );
         }
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'settings/communityLinks')
@@ -291,7 +298,7 @@ export function AdminConsolePage({
           u.displayName.toLowerCase().includes(q) ||
           u.email.toLowerCase().includes(q) ||
           u.studentId.toLowerCase().includes(q) ||
-          u.cohort.toLowerCase().includes(q)
+          formatAdmissionTerm(u.cohort).toLowerCase().includes(q)
         );
       }
       return true;
@@ -363,7 +370,7 @@ export function AdminConsolePage({
         batch.set(memberRef, {
           uid: user.uid,
           displayName: user.displayName.slice(0, LIMITS.displayName),
-          cohort: user.cohort.slice(0, LIMITS.cohort),
+          cohort: formatAdmissionTerm(user.cohort).slice(0, LIMITS.cohort),
           program: user.program,
           academicStatus: user.academicStatus,
           researchInterest: (user.researchInterest || '').slice(0, LIMITS.researchInterest),
@@ -801,7 +808,7 @@ export function AdminConsolePage({
                 type="search"
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
-                placeholder="이름, 이메일, 학번, 기수 검색"
+                placeholder="이름, 이메일, 학번, 입학년도/학기 검색"
                 className="w-full pl-8 pr-3 py-1.5 text-xs border border-stone-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-[#002968]/20 focus:border-[#002968]"
               />
             </div>
@@ -844,7 +851,7 @@ export function AdminConsolePage({
                         <td className="py-3.5 px-4">
                           <p className="font-mono tabular-nums text-stone-800">{u.studentId}</p>
                           <p className="text-stone-500">
-                            {u.cohort} · {u.program} ({u.academicStatus})
+                            {formatAdmissionTerm(u.cohort)} · {u.program} ({u.academicStatus})
                           </p>
                         </td>
                         <td className="py-3.5 px-4">
@@ -985,7 +992,7 @@ export function AdminConsolePage({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-stone-700 mb-1">
-                    학기 · 기수 표기
+                    학기 · 캠퍼스 표기
                   </label>
                   <input
                     type="text"

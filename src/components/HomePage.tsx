@@ -14,6 +14,7 @@ import { DEFAULT_PUBLIC_SETTINGS } from '../lib/seedData';
 import {
   COVER_IMAGE_URL,
   CouncilActivity,
+  formatAdmissionTerm,
   PageTab,
   PublicSettings,
 } from '../types/community';
@@ -75,9 +76,11 @@ export function HomePage({
 
         {/* Page Title & Unboxed Metadata */}
         <header className="mb-8 pb-6 border-b border-stone-200">
-          <p className="text-xs font-medium text-stone-500 mb-2">
-            {settings.semesterLabel}
-          </p>
+          {settings.semesterLabel.replace(/제18대\s*원우회\s*·?\s*/g, '').trim() && (
+            <p className="text-xs font-medium text-stone-500 mb-2">
+              {settings.semesterLabel.replace(/제18대\s*원우회\s*·?\s*/g, '').trim()}
+            </p>
+          )}
           <h1 className="font-serif text-2xl sm:text-4xl font-bold text-stone-900 tracking-tight leading-snug mb-3">
             {settings.councilName}
           </h1>
@@ -168,7 +171,7 @@ export function HomePage({
                     '원우회 회원 가입 신청 후 관리자의 회원 인증이 완료되면 게시판, 연구 동향 아카이브, 카카오톡 오픈채팅방 링크를 모두 이용하실 수 있습니다.'}
                 </p>
                 <p className="text-xs text-stone-600">
-                  가입 절차: Google 계정 로그인 → 회원 가입 신청서(성명·학번·기수) 제출 → 원우회 관리자 확인 후 회원 인증 완료
+                  가입 절차: Google 계정 로그인 → 회원 가입 신청서(성명·학번·입학년도/학기) 제출 → 원우회 관리자 확인 후 회원 인증 완료
                 </p>
               </div>
             ) : !profile ? (
@@ -178,7 +181,7 @@ export function HomePage({
             ) : profile.status === 'pending' ? (
               <div className="space-y-1">
                 <p className="font-medium text-stone-900">
-                  {profile.displayName} 원우님 ({profile.cohort} · {profile.program})의 회원 가입 신청이 접수되었습니다.
+                  {profile.displayName} 원우님 ({formatAdmissionTerm(profile.cohort)} · {profile.program})의 회원 가입 신청이 접수되었습니다.
                 </p>
                 <p className="text-xs text-stone-600">
                   원우회 관리자가 학번과 원우 여부를 확인하여 회원 인증을 완료하면 회원 전용 게시판, 연구 동향, 카카오톡 오픈채팅방이 즉시 열립니다.
@@ -196,44 +199,19 @@ export function HomePage({
                 </p>
                 <p className="text-xs text-stone-600">
                   인증 완료 회원: {profile?.displayName || authUser.displayName || '원우회 관리자'} ·{' '}
-                  {isAdmin ? '원우회 웹 관리자' : `${profile?.cohort ?? ''} ${profile?.program ?? ''}`.trim()}
+                  {isAdmin
+                    ? '원우회 웹 관리자'
+                    : `${formatAdmissionTerm(profile?.cohort)} ${profile?.program ?? ''}`.trim()}
                 </p>
               </div>
             )}
           </NotionCallout>
         </section>
 
-        {/* Department Introduction Block */}
-        <section className="mb-12">
-          <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-lg font-bold text-stone-900">01. 학과 및 원우회 소개</h2>
-            <span className="text-xs text-stone-500">Department of Youth Guidance</span>
-          </div>
-          <div className="rounded-lg border border-stone-200 bg-white p-5 sm:p-6">
-            <p className="text-sm sm:text-[15px] text-stone-700 leading-relaxed whitespace-pre-line max-w-3xl">
-              {settings.departmentIntro || DEFAULT_PUBLIC_SETTINGS.departmentIntro}
-            </p>
-            <dl className="mt-6 pt-5 border-t border-stone-100 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-              <div>
-                <dt className="text-xs text-stone-500 mb-0.5">소속 대학원</dt>
-                <dd className="font-semibold text-stone-900">명지대학교 일반대학원</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-stone-500 mb-0.5">개설 과정</dt>
-                <dd className="font-semibold text-stone-900">석사 · 박사 · 석박사통합</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-stone-500 mb-0.5">주요 교류 채널</dt>
-                <dd className="font-semibold text-stone-900">정기 콜로퀴엄 · 원우 카톡방</dd>
-              </div>
-            </dl>
-          </div>
-        </section>
-
         {/* Notion Workspace Quick Database Grid */}
         <section className="mb-12">
           <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-lg font-bold text-stone-900">02. 원우회 주요 워크스페이스</h2>
+            <h2 className="text-lg font-bold text-stone-900">01. 원우회 주요 워크스페이스</h2>
             <span className="text-xs text-stone-500">페이지 바로가기</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -322,7 +300,7 @@ export function HomePage({
         {/* Recent Activities Preview */}
         <section>
           <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-lg font-bold text-stone-900">03. 최근 원우회 주요 활동</h2>
+            <h2 className="text-lg font-bold text-stone-900">02. 최근 원우회 주요 활동</h2>
             <button
               type="button"
               onClick={() => onNavigate('activities')}

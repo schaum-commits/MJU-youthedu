@@ -13,7 +13,8 @@ export function MembershipApplicationModal({
   const { authUser, profile, submitApplication, updateMyProfile } = useAuth();
 
   const [displayName, setDisplayName] = useState('');
-  const [cohort, setCohort] = useState('');
+  const [admissionYear, setAdmissionYear] = useState('2026');
+  const [admissionSemester, setAdmissionSemester] = useState<'1학기' | '2학기'>('1학기');
   const [program, setProgram] = useState<DegreeProgram>('석사과정');
   const [academicStatus, setAcademicStatus] = useState<AcademicStatus>('재학');
   const [studentId, setStudentId] = useState('');
@@ -23,13 +24,18 @@ export function MembershipApplicationModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  const yearOptions = Array.from({ length: 15 }, (_, idx) => String(2027 - idx));
+
   useEffect(() => {
     if (!open) return;
     setErrorMsg(null);
     setSuccessMsg(null);
     if (profile) {
       setDisplayName(profile.displayName || '');
-      setCohort(profile.cohort || '');
+      const rawCohort = profile.cohort || '';
+      const yearMatch = rawCohort.match(/(20\d{2})/);
+      setAdmissionYear(yearMatch ? yearMatch[1] : '2026');
+      setAdmissionSemester(/(2학기|후기)/.test(rawCohort) ? '2학기' : '1학기');
       setProgram(profile.program || '석사과정');
       setAcademicStatus(profile.academicStatus || '재학');
       setStudentId(profile.studentId || '');
@@ -37,7 +43,8 @@ export function MembershipApplicationModal({
       setApplicationNote(profile.applicationNote || '');
     } else if (authUser) {
       setDisplayName(authUser.displayName || '');
-      setCohort('2026학년도 전기');
+      setAdmissionYear('2026');
+      setAdmissionSemester('1학기');
       setProgram('석사과정');
       setAcademicStatus('재학');
       setStudentId('');
@@ -53,8 +60,10 @@ export function MembershipApplicationModal({
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    const cohort = `${admissionYear}학년도 ${admissionSemester}`;
+
     if (!displayName.trim() || !cohort.trim() || !studentId.trim()) {
-      setErrorMsg('이름, 입학 기수, 학번을 모두 입력해 주세요.');
+      setErrorMsg('이름, 입학년도/입학학기, 학번을 모두 입력해 주세요.');
       return;
     }
 
@@ -121,7 +130,7 @@ export function MembershipApplicationModal({
           {!profile && (
             <div className="rounded-lg border border-[#D5DFEE] bg-[#F4F7FB] px-3.5 py-2.5 text-xs text-stone-700 leading-relaxed">
               가입 신청서를 제출하면 <strong className="text-stone-900">관리자 회원 인증 대기</strong>{' '}
-              상태로 등록됩니다. 원우회 관리자가 학번·기수를 확인해 인증을 완료하면 회원 전용 게시판과 연구 동향, 오픈채팅방이 즉시 열립니다.
+              상태로 등록됩니다. 원우회 관리자가 학번·입학년도/입학학기를 확인해 인증을 완료하면 회원 전용 게시판과 연구 동향, 오픈채팅방이 즉시 열립니다.
             </div>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -156,20 +165,36 @@ export function MembershipApplicationModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">
-                입학 기수/연도 <span className="text-red-600">*</span>
+                입학년도 <span className="text-red-600">*</span>
               </label>
-              <input
-                type="text"
-                required
-                maxLength={LIMITS.cohort}
-                value={cohort}
-                onChange={(e) => setCohort(e.target.value)}
-                placeholder="2026 전기"
-                className="w-full px-3 py-2 text-sm border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#002968]/20 focus:border-[#002968]"
-              />
+              <select
+                value={admissionYear}
+                onChange={(e) => setAdmissionYear(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-stone-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-[#002968]/20 focus:border-[#002968]"
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>
+                    {y}학년도
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                입학학기 <span className="text-red-600">*</span>
+              </label>
+              <select
+                value={admissionSemester}
+                onChange={(e) => setAdmissionSemester(e.target.value as '1학기' | '2학기')}
+                className="w-full px-3 py-2 text-sm border border-stone-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-[#002968]/20 focus:border-[#002968]"
+              >
+                <option value="1학기">1학기 (전기)</option>
+                <option value="2학기">2학기 (후기)</option>
+              </select>
             </div>
 
             <div>

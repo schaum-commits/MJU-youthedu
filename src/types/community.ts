@@ -26,6 +26,24 @@ export type PageTab =
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'schaum@mju.ac.kr';
 
+export const DEFAULT_KAKAO_CHAT_URL = 'https://invite.kakao.com/tc/sFZLj874sv';
+
+export function resolveKakaoChatUrl(url?: string): string {
+  const trimmed = url?.trim();
+  if (!trimmed || trimmed === 'https://open.kakao.com/o/mju-youth-council-demo') {
+    return DEFAULT_KAKAO_CHAT_URL;
+  }
+  return trimmed;
+}
+
+export function formatAdmissionTerm(value?: string): string {
+  const trimmed = value?.trim() || '';
+  if (!trimmed || trimmed === '제18대 원우회') {
+    return '2026학년도 1학기';
+  }
+  return trimmed;
+}
+
 export const COVER_IMAGE_URL = './src/assets/images/mju_bangmok_campus_1794821245874.jpg';
 
 export const ACTIVITY_PRESET_IMAGES = [

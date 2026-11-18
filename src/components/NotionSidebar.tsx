@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { PageTab } from '../types/community';
+import { formatAdmissionTerm, PageTab } from '../types/community';
 
 interface NavItem {
   id: PageTab;
@@ -157,7 +157,7 @@ export function NotionSidebar({
                   {profile.displayName} · {isAdmin ? '관리자' : '정회원'}
                 </p>
                 <p className="text-[11px] text-stone-500 truncate">
-                  {profile.cohort} · {profile.program}
+                  {formatAdmissionTerm(profile.cohort)} · {profile.program}
                 </p>
                 <button
                   type="button"
@@ -177,7 +177,7 @@ export function NotionSidebar({
                       : '승인 보류됨'}
                 </p>
                 <p className="text-[11px] text-stone-500 truncate">
-                  {profile.displayName} · {profile.cohort}
+                  {profile.displayName} · {formatAdmissionTerm(profile.cohort)}
                 </p>
                 <button
                   type="button"

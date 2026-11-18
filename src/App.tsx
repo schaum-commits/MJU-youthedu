@@ -7,7 +7,14 @@ import React, { Component, useEffect, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from './lib/firebase';
-import { CouncilActivity, PageTab, PublicSettings } from './types/community';
+import {
+  CommunityLinks,
+  CouncilActivity,
+  DEFAULT_KAKAO_CHAT_URL,
+  PageTab,
+  PublicSettings,
+  resolveKakaoChatUrl,
+} from './types/community';
 import { NotionSidebar } from './components/NotionSidebar';
 import { TopBreadcrumbBar } from './components/TopBreadcrumbBar';
 import { MembershipApplicationModal } from './components/MembershipApplicationModal';
@@ -57,8 +64,16 @@ class CommunityErrorBoundary extends Component<
 }
 
 function WorkspaceShell() {
-  const { authReady, authUser, profile, profileLoading, isAdmin, authError, clearAuthError } =
-    useAuth();
+  const {
+    authReady,
+    authUser,
+    profile,
+    profileLoading,
+    isAdmin,
+    isApprovedMember,
+    authError,
+    clearAuthError,
+  } = useAuth();
   const [activeTab, setActiveTab] = useState<PageTab>('home');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [applicationModalOpen, setApplicationModalOpen] = useState(false);
@@ -68,6 +83,7 @@ function WorkspaceShell() {
   const [activities, setActivities] = useState<CouncilActivity[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<CouncilActivity | null>(null);
   const [pendingMemberCount, setPendingMemberCount] = useState(0);
+  const [kakaoChatUrl, setKakaoChatUrl] = useState(DEFAULT_KAKAO_CHAT_URL);
 
   useEffect(() => {
     const unsubSettings = onSnapshot(
@@ -111,6 +127,26 @@ function WorkspaceShell() {
   }, [authReady, isAdmin]);
 
   useEffect(() => {
+    if (!authReady || !isApprovedMember) {
+      setKakaoChatUrl(DEFAULT_KAKAO_CHAT_URL);
+      return;
+    }
+    const unsubLinks = onSnapshot(
+      doc(db, 'settings', 'communityLinks'),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as CommunityLinks;
+          setKakaoChatUrl(resolveKakaoChatUrl(data.mainChatUrl));
+        } else {
+          setKakaoChatUrl(DEFAULT_KAKAO_CHAT_URL);
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.GET, 'settings/communityLinks')
+    );
+    return unsubLinks;
+  }, [authReady, isApprovedMember]);
+
+  useEffect(() => {
     if (!authReady) return;
     const activitiesQuery = isAdmin
       ? query(collection(db, 'activities'), orderBy('createdAt', 'desc'))
@@ -150,6 +186,7 @@ function WorkspaceShell() {
       <div className="flex-1 min-w-0 flex flex-col min-h-screen">
         <TopBreadcrumbBar
           activeTab={activeTab}
+          kakaoChatUrl={kakaoChatUrl}
           onSelectTab={setActiveTab}
           onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           onOpenApplicationModal={() => setApplicationModalOpen(true)}

@@ -26,6 +26,7 @@ import {
   BoardCategory,
   BoardComment,
   BoardPost,
+  formatAdmissionTerm,
   LIMITS,
   PageTab,
   RecruitStatus,
@@ -240,7 +241,10 @@ export function MemberBoardPage({
           0,
           LIMITS.displayName
         );
-        const authorCohort = (profile?.cohort || '원우회원').slice(0, LIMITS.cohort);
+        const authorCohort = formatAdmissionTerm(profile?.cohort || '원우회원').slice(
+          0,
+          LIMITS.cohort
+        );
         try {
           const docRef = await addDoc(collection(db, 'boardPosts'), {
             title: cleanTitle,
@@ -291,7 +295,7 @@ export function MemberBoardPage({
           0,
           LIMITS.displayName
         ),
-        authorCohort: (profile?.cohort || '원우회원').slice(0, LIMITS.cohort),
+        authorCohort: formatAdmissionTerm(profile?.cohort || '원우회원').slice(0, LIMITS.cohort),
         content: commentInput.trim().slice(0, LIMITS.commentContent),
         createdAt: serverTimestamp(),
       });
@@ -442,7 +446,7 @@ export function MemberBoardPage({
                   )}
                   <span aria-hidden="true">·</span>
                   <span>
-                    {post.authorName} ({post.authorCohort})
+                    {post.authorName} ({formatAdmissionTerm(post.authorCohort)})
                   </span>
                 </div>
                 <p className="text-sm sm:text-[15px] font-semibold text-stone-900 truncate">
@@ -666,7 +670,7 @@ export function MemberBoardPage({
               <span>{selectedPost.category}</span>
               <span aria-hidden="true">·</span>
               <span>
-                {selectedPost.authorName} ({selectedPost.authorCohort})
+                {selectedPost.authorName} ({formatAdmissionTerm(selectedPost.authorCohort)})
               </span>
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums">
@@ -724,7 +728,7 @@ export function MemberBoardPage({
                           <div className="text-xs text-stone-600">
                             <span className="font-semibold text-stone-900">{c.authorName}</span>
                             <span className="mx-1.5 text-stone-400">·</span>
-                            <span>{c.authorCohort}</span>
+                            <span>{formatAdmissionTerm(c.authorCohort)}</span>
                             <span className="mx-1.5 text-stone-400">·</span>
                             <span className="font-mono tabular-nums text-stone-500">
                               {formatKoreanDateTime(c.createdAt)}

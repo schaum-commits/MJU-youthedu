@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Timestamp } from 'firebase/firestore';
 import { BookOpen, Lock, ShieldAlert, X } from 'lucide-react';
-import { PageTab } from '../types/community';
+import { formatAdmissionTerm, PageTab } from '../types/community';
 import { useAuth } from '../contexts/AuthContext';
 
 export function formatKoreanDate(ts?: Timestamp | null): string {
@@ -247,7 +247,7 @@ export function MemberAccessGate({
           <div className="rounded-lg bg-white border border-stone-200 p-4 space-y-2">
             <p className="text-sm font-semibold text-stone-900">가입 승인 대기 중입니다</p>
             <p className="text-sm text-stone-600 leading-relaxed">
-              {profile.displayName} ({profile.cohort} · {profile.program}) 원우님의 가입 신청이
+              {profile.displayName} ({formatAdmissionTerm(profile.cohort)} · {profile.program}) 원우님의 가입 신청이
               원우회 운영진에게 전달되었습니다. 승인 완료 시 모든 회원 전용 페이지가 열립니다.
             </p>
             <button
@@ -262,7 +262,7 @@ export function MemberAccessGate({
           <div className="rounded-lg bg-white border border-stone-200 p-4 space-y-2">
             <p className="text-sm font-semibold text-red-700">가입 승인이 보류 또는 반려되었습니다</p>
             <p className="text-sm text-stone-600">
-              학적 정보(학번 및 기수)를 다시 확인한 뒤 신청 정보를 수정하거나 원우회 관리자에게
+              학적 정보(학번 및 입학년도/입학학기)를 다시 확인한 뒤 신청 정보를 수정하거나 원우회 관리자에게
               문의해 주세요.
             </p>
             <button

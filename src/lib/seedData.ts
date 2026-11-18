@@ -9,11 +9,11 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { ACTIVITY_PRESET_IMAGES } from '../types/community';
+import { ACTIVITY_PRESET_IMAGES, DEFAULT_KAKAO_CHAT_URL } from '../types/community';
 
 export const DEFAULT_PUBLIC_SETTINGS = {
   councilName: '명지대학교 대학원 청소년지도학과 원우회',
-  semesterLabel: '제18대 원우회 · 2026학년도 · 서울 인문캠퍼스',
+  semesterLabel: '2026학년도 · 서울 인문캠퍼스',
   welcomeHeadline: '청소년학과 현장을 잇는 연구 공동체, 명지 원우회 아카이브',
   welcomeSummary:
     '명지대학교 대학원 청소년지도학과 원우회 공식 커뮤니티입니다. 학기별 주요 원우회 활동 안내, 원우 전용 공지 및 스터디 모집 게시판, 최신 청소년 정책·상담·학술 연구 동향 공유, 그리고 실시간 카카오톡 오픈채팅 라운지를 한곳에서 이용하실 수 있습니다.',
@@ -44,12 +44,12 @@ export async function seedInitialWorkspaceData(adminUid: string, adminName: stri
     if (!linksSnap.exists()) {
       batch.set(communityLinksRef, {
         mainChatTitle: '명지대 청소년지도학과 원우회 공식 오픈채팅방',
-        mainChatUrl: 'https://open.kakao.com/o/mju-youth-council-demo',
+        mainChatUrl: DEFAULT_KAKAO_CHAT_URL,
         mainChatPasscode: 'mju2026',
         studyChatTitle: '대학원 논문·연구방법론 스터디방',
         studyChatUrl: 'https://open.kakao.com/o/mju-youth-study-demo',
         roomRules:
-          '1. 원우회 승인 회원만 참여 가능하며, 입장 후 [기수/과정/이름] 형식으로 닉네임을 설정해 주세요.\n2. 학술 정보·세미나·학사 일정 공유를 우선하며, 외부 비인가자 초대 및 영리 목적 홍보는 제한됩니다.',
+          '1. 원우회 승인 회원만 참여 가능하며, 입장 후 [입학년도/과정/이름] 형식으로 닉네임을 설정해 주세요.\n2. 학술 정보·세미나·학사 일정 공유를 우선하며, 외부 비인가자 초대 및 영리 목적 홍보는 제한됩니다.',
         updatedAt: serverTimestamp(),
       });
       hasWrites = true;
@@ -123,10 +123,10 @@ export async function seedInitialWorkspaceData(adminUid: string, adminName: stri
       const seedPosts = [
         {
           id: 'post-welcome-notice',
-          title: '[공지] 제18대 청소년지도학과 원우회 커뮤니티 오픈 및 이용 안내',
+          title: '[공지] 명지대 청소년지도학과 원우회 커뮤니티 오픈 및 이용 안내',
           category: '공지사항',
           content:
-            '안녕하세요, 제18대 명지대학교 대학원 청소년지도학과 원우회입니다.\n\n원우님들 간의 학술 교류와 긴밀한 소통을 위해 원우회 전용 커뮤니티 웹페이지를 개설했습니다.\n- 회원 전용 게시판: 원우회 공식 공지, 논문·통계 스터디 모집, 학사 Q&A\n- 연구 동향 아카이브: 청소년 정책·상담·미디어 최신 보고서와 논문 요약 공유\n- 카카오톡 라운지: 원우회 공식 오픈채팅방 바로가기 및 참여코드 확인\n\n모든 원우님들의 적극적인 참여를 부탁드립니다.',
+            '안녕하세요, 명지대학교 대학원 청소년지도학과 원우회입니다.\n\n원우님들 간의 학술 교류와 긴밀한 소통을 위해 원우회 전용 커뮤니티 웹페이지를 개설했습니다.\n- 회원 전용 게시판: 원우회 공식 공지, 논문·통계 스터디 모집, 학사 Q&A\n- 연구 동향 아카이브: 청소년 정책·상담·미디어 최신 보고서와 논문 요약 공유\n- 카카오톡 라운지: 원우회 공식 오픈채팅방 바로가기 및 참여코드 확인\n\n모든 원우님들의 적극적인 참여를 부탁드립니다.',
           isPinned: true,
           recruitStatus: '해당없음',
           studySchedule: '',

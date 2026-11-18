@@ -3,7 +3,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { Check, Copy, ExternalLink, MessageCircle, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { CommunityLinks, PageTab } from '../types/community';
+import { CommunityLinks, PageTab, resolveKakaoChatUrl } from '../types/community';
 import { MemberAccessGate, NotionCallout } from './NotionPrimitives';
 
 export function KakaoLoungePage({
@@ -111,7 +111,7 @@ export function KakaoLoungePage({
                 <h2 className="text-lg font-bold text-stone-900">{links.mainChatTitle}</h2>
               </div>
               <a
-                href={links.mainChatUrl}
+                href={resolveKakaoChatUrl(links.mainChatUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-stone-900 bg-[#FEE500] hover:bg-[#F5DC00] border border-[#E5CE00] rounded-lg transition-colors whitespace-nowrap shrink-0"
@@ -179,7 +179,12 @@ export function KakaoLoungePage({
               title="원우회 오픈채팅방 이용 안내"
               tone="neutral"
             >
-              <div className="whitespace-pre-line">{links.roomRules}</div>
+              <div className="whitespace-pre-line">
+                {links.roomRules.replace(
+                  /\[(?:기수|입학년도\/학기)\/과정\/이름\]/g,
+                  '[입학년도/과정/이름]'
+                )}
+              </div>
             </NotionCallout>
           )}
         </div>

@@ -61,6 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [hasMemberPublicDoc, setHasMemberPublicDoc] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const bootstrappedRef = useRef<string | null>(null);
+  const migratedCohortRef = useRef<string | null>(null);
 
   const isBootstrappedAdmin = Boolean(
     authUser?.emailVerified && authUser?.email === BOOTSTRAPPED_ADMIN_EMAIL
@@ -102,7 +103,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       doc(db, 'users', uid),
       async (snap) => {
         if (snap.exists()) {
-          setProfile(snap.data() as UserProfile);
+          const data = snap.data() as UserProfile;
+          if (
+            data.cohort === '제18대 원우회' &&
+            authUser.emailVerified &&
+            authUser.email === BOOTSTRAPPED_ADMIN_EMAIL &&
+            migratedCohortRef.current !== uid
+          ) {
+            migratedCohortRef.current = uid;
+            setProfile({ ...data, cohort: '2026학년도 1학기' });
+            try {
+              const batch = writeBatch(db);
+              batch.update(doc(db, 'users', uid), {
+                cohort: '2026학년도 1학기',
+                updatedAt: serverTimestamp(),
+              });
+              batch.update(doc(db, 'membersPublic', uid), {
+                cohort: '2026학년도 1학기',
+                updatedAt: serverTimestamp(),
+              });
+              await batch.commit();
+            } catch {
+              // Ignore if membersPublic does not exist yet
+            }
+          } else {
+            setProfile(data);
+          }
         } else {
           setProfile(null);
           if (
@@ -121,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 uid,
                 email: authUser.email,
                 displayName,
-                cohort: '제18대 원우회',
+                cohort: '2026학년도 1학기',
                 program: '석사과정',
                 academicStatus: '재학',
                 studentId: 'ADMIN-MJU',
@@ -134,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               batch.set(doc(db, 'membersPublic', uid), {
                 uid,
                 displayName,
-                cohort: '제18대 원우회',
+                cohort: '2026학년도 1학기',
                 program: '석사과정',
                 academicStatus: '재학',
                 researchInterest: '청소년지도 및 정책 연구',
