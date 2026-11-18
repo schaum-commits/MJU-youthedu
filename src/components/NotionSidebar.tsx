@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  BookOpen,
   CalendarDays,
   FileText,
   GraduationCap,
@@ -30,7 +29,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'activities', label: '원우회 활동', icon: CalendarDays },
   { id: 'youthTrends', label: '청소년지도 연구동향', icon: Sparkles },
   { id: 'board', label: '회원 전용 게시판', icon: FileText, memberOnly: true },
-  { id: 'trends', label: '연구 동향 아카이브', icon: BookOpen, memberOnly: true },
   { id: 'kakao', label: '카카오톡 라운지', icon: MessageCircle, memberOnly: true },
   { id: 'directory', label: '원우 네트워크', icon: Users, memberOnly: true },
   { id: 'admin', label: '관리자 콘솔', icon: ShieldCheck, adminOnly: true },

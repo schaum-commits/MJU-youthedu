@@ -19,7 +19,6 @@ export type PageTab =
   | 'home'
   | 'activities'
   | 'board'
-  | 'trends'
   | 'youthTrends'
   | 'kakao'
   | 'directory'

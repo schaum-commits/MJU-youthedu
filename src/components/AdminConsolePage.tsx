@@ -50,11 +50,15 @@ import {
   toggleResearchAutoSync,
 } from '../lib/researchSync';
 import {
+  AcademicSourcesStatusResponse,
   collectAndAnalyzePapers,
+  fetchAcademicSourcesStatus,
   generateMonthlyTrendReport,
   getKstScheduleContext,
   isSyncActivelyRunning,
+  NanetSearchTestResult,
   retryFailedPapers,
+  testNanetPaperSearch,
   togglePaperVisibility,
 } from '../lib/youthPaperSync';
 import { DEFAULT_PUBLIC_SETTINGS, seedInitialWorkspaceData } from '../lib/seedData';
@@ -127,6 +131,10 @@ export function AdminConsolePage({
   const [generatingMonthlyReport, setGeneratingMonthlyReport] = useState(false);
   const [confirmDeletePaperId, setConfirmDeletePaperId] = useState<string | null>(null);
   const [confirmDeleteReportId, setConfirmDeleteReportId] = useState<string | null>(null);
+  const [sourcesStatus, setSourcesStatus] = useState<AcademicSourcesStatusResponse | null>(null);
+  const [nanetQuery, setNanetQuery] = useState('청소년지도');
+  const [nanetTesting, setNanetTesting] = useState(false);
+  const [nanetTestResult, setNanetTestResult] = useState<NanetSearchTestResult | null>(null);
 
   // Members & Admins State
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -203,6 +211,11 @@ export function AdminConsolePage({
       setFeedback((curr) => (curr?.text === text ? null : curr));
     }, 3500);
   };
+
+  useEffect(() => {
+    if (!isAdmin || subTab !== 'research') return;
+    void fetchAcademicSourcesStatus().then((res) => setSourcesStatus(res));
+  }, [isAdmin, subTab]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -821,6 +834,18 @@ export function AdminConsolePage({
       showToast(res.ok ? 'ok' : 'err', res.message);
     } finally {
       setRetryingFailed(false);
+    }
+  };
+
+  const handleNanetSearchTest = async () => {
+    if (nanetTesting) return;
+    setNanetTesting(true);
+    try {
+      const res = await testNanetPaperSearch(nanetQuery, 1, 10);
+      setNanetTestResult(res);
+      showToast(res.ok ? 'ok' : 'err', res.message);
+    } finally {
+      setNanetTesting(false);
     }
   };
 
@@ -2324,6 +2349,156 @@ export function AdminConsolePage({
                   </div>
                 ))
               )}
+            </div>
+          </div>
+
+          {/* Academic Sources Governance & Step 2 National Assembly Library Test */}
+          <div className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-stone-900">
+                  국내외 학술정보 API 연동 현황 · 2단계 국회도서관 검색 테스트
+                </h3>
+                <p className="text-xs text-stone-600 mt-0.5">
+                  인증키가 없는 서비스는 임의 데이터를 생성하지 않고 연결 준비 상태로 표시합니다.
+                  {sourcesStatus?.koreanKeywords?.totalCount
+                    ? ` (국내 확장 검색어 ${sourcesStatus.koreanKeywords.totalCount}개 등록됨)`
+                    : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void fetchAcademicSourcesStatus().then((res) => setSourcesStatus(res))}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 hover:bg-stone-50 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3" />
+                연동 상태 새로고침
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {sourcesStatus && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {sourcesStatus.sources.map((src) => (
+                    <div
+                      key={src.id}
+                      className="rounded-lg border border-stone-200 bg-[#FBFBFA] p-3.5 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-stone-900 truncate">
+                          {src.name}
+                        </span>
+                        <span
+                          className={`text-[11px] font-semibold whitespace-nowrap shrink-0 ${
+                            src.status === 'connected'
+                              ? 'text-emerald-700'
+                              : src.status === 'ready_needs_key'
+                                ? 'text-amber-700'
+                                : 'text-stone-500'
+                          }`}
+                        >
+                          {src.status === 'connected'
+                            ? '연결됨'
+                            : src.status === 'ready_needs_key'
+                              ? '연결 준비 (인증키 필요)'
+                              : src.stepLabel}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-stone-500">
+                        {src.scope === 'domestic' ? '국내 우선' : '해외 보완'} ·{' '}
+                        {src.envVar ? `환경변수 ${src.envVar}` : '인증키 불필요'} · 저장범위{' '}
+                        {src.storagePermission}
+                      </p>
+                      <p className="text-[11px] text-stone-600 leading-relaxed">{src.termsSummary}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="rounded-lg border border-stone-200 bg-[#F7F6F3] p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <div className="flex-1 flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="국내 핵심 검색어 선택"
+                      value={
+                        sourcesStatus?.koreanKeywords?.core?.includes(nanetQuery) ||
+                        sourcesStatus?.koreanKeywords?.extended?.includes(nanetQuery)
+                          ? nanetQuery
+                          : ''
+                      }
+                      onChange={(e) => {
+                        if (e.target.value) setNanetQuery(e.target.value);
+                      }}
+                      className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-md bg-white text-stone-700"
+                    >
+                      <option value="">검색어 프리셋 (30개)</option>
+                      {(sourcesStatus?.koreanKeywords?.core || []).map((kw) => (
+                        <option key={`core_${kw}`} value={kw}>
+                          [핵심] {kw}
+                        </option>
+                      ))}
+                      {(sourcesStatus?.koreanKeywords?.extended || []).map((kw) => (
+                        <option key={`ext_${kw}`} value={kw}>
+                          [확장] {kw}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={nanetQuery}
+                      onChange={(e) => setNanetQuery(e.target.value)}
+                      placeholder="국회도서관 테스트 검색어 (예: 청소년지도)"
+                      className="flex-1 min-w-[200px] px-3 py-1.5 text-xs border border-stone-300 rounded-md bg-white focus:outline-none focus:border-[#002968]"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleNanetSearchTest}
+                    disabled={nanetTesting}
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    {nanetTesting ? '검색 테스트 중...' : '국회도서관 실데이터 검색 테스트'}
+                  </button>
+                </div>
+
+                {nanetTestResult && (
+                  <div
+                    className={`rounded-md border p-3 text-xs space-y-2 ${
+                      nanetTestResult.ok
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                        : nanetTestResult.status === 'ready_needs_key'
+                          ? 'bg-amber-50 border-amber-200 text-amber-950'
+                          : 'bg-red-50 border-red-200 text-red-900'
+                    }`}
+                  >
+                    <p className="font-semibold">{nanetTestResult.message}</p>
+                    {nanetTestResult.papers.length > 0 && (
+                      <ul className="space-y-1.5 pt-1 border-t border-emerald-200/70">
+                        {nanetTestResult.papers.slice(0, 5).map((item) => (
+                          <li key={item.sourceId} className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-medium text-stone-900 truncate">{item.title}</p>
+                              <p className="text-[11px] text-stone-600 truncate">
+                                {item.authors.join(', ')} · {item.journalName} ·{' '}
+                                {item.publicationDate || '발행일 미상'}
+                              </p>
+                            </div>
+                            <a
+                              href={item.paperUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-semibold text-[#002968] hover:underline whitespace-nowrap shrink-0"
+                            >
+                              원문 확인
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </section>

@@ -7,7 +7,6 @@ const TAB_LABELS: Record<PageTab, string> = {
   home: '홈 · 원우회 소개',
   activities: '원우회 활동',
   board: '회원 전용 게시판',
-  trends: '연구 동향 아카이브',
   youthTrends: '청소년지도 연구동향',
   kakao: '카카오톡 라운지',
   directory: '원우 네트워크',
@@ -87,15 +86,6 @@ export function TopBreadcrumbBar({
           }`}
         >
           청소년지도 연구동향
-        </button>
-        <button
-          type="button"
-          onClick={() => onSelectTab('trends')}
-          className={`whitespace-nowrap shrink-0 hover:text-stone-900 transition-colors cursor-pointer ${
-            activeTab === 'trends' ? 'text-[#002968] underline underline-offset-4' : ''
-          }`}
-        >
-          원우 연구공유
         </button>
         <button
           type="button"

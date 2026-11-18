@@ -61,6 +61,381 @@ const CATEGORY_QUERIES: Array<{
   },
 ];
 
+const CORE_KOREAN_KEYWORDS = [
+  '청소년지도',
+  '청소년지도자',
+  '청소년활동',
+  '청소년수련활동',
+  '청소년시설',
+  '청소년정책',
+  '청소년 참여',
+  '청소년 역량',
+  '청소년 진로',
+  '청소년 리더십',
+  '청소년 자치활동',
+  '청소년 프로그램',
+  '청소년 시민성',
+  '청소년 복지',
+  '학교 밖 청소년',
+  '청소년 성장',
+  '청소년 교육',
+  '청소년 문화',
+  '청소년 사회참여',
+  '청소년지도 전문성',
+] as const;
+
+const EXTENDED_KOREAN_KEYWORDS = [
+  'AI와 청소년',
+  '디지털 청소년활동',
+  '미디어 리터러시',
+  '청소년 활동 효과',
+  '청소년 기관 운영',
+  '청소년 정책 평가',
+  '청소년 활동 프로그램 개발',
+  '청소년 진로개발',
+  '청소년 리더십 교육',
+  '청소년지도사 역량',
+] as const;
+
+interface AcademicSourceStatus {
+  id: 'nanet' | 'nl' | 'dbpia' | 'openalex' | 'crossref';
+  name: string;
+  scope: 'domestic' | 'international';
+  envVar?: string;
+  configured: boolean;
+  status: 'connected' | 'ready_needs_key' | 'planned';
+  stepLabel: string;
+  storagePermission: 'metadata_and_link' | 'open_metadata_and_abstract' | 'search_only_link';
+  aiProcessingPermission: 'abstract_or_open_fulltext_only' | 'prohibited_without_license' | 'allowed_open_abstract';
+  termsSummary: string;
+  endpointInfo: string;
+}
+
+interface NanetPaperPreview {
+  sourceId: string;
+  title: string;
+  authors: string[];
+  journalName: string;
+  publicationDate: string;
+  materialType: string;
+  paperUrl: string;
+  sourceName: string;
+  country: 'KR';
+  region: 'domestic';
+  dataAvailability: 'metadata_only';
+  storagePermission: 'metadata_and_link';
+  aiProcessingPermission: 'abstract_or_open_fulltext_only';
+}
+
+function buildAcademicSourcesStatus(): AcademicSourceStatus[] {
+  const nanetConfigured = Boolean(process.env.NANET_API_KEY?.trim());
+  const nlConfigured = Boolean(process.env.NL_API_KEY?.trim());
+  const dbpiaConfigured = Boolean(process.env.DBPIA_API_KEY?.trim());
+  return [
+    {
+      id: 'nanet',
+      name: '국회도서관 국가학술정보 · 자료검색 Open API',
+      scope: 'domestic',
+      envVar: 'NANET_API_KEY',
+      configured: nanetConfigured,
+      status: nanetConfigured ? 'connected' : 'ready_needs_key',
+      stepLabel: '2단계 (구현 완료)',
+      storagePermission: 'metadata_and_link',
+      aiProcessingPermission: 'abstract_or_open_fulltext_only',
+      termsSummary:
+        '공공데이터포털(data.go.kr) 활용신청 키 기반 서지 메타데이터 및 상세 링크 조회. 과도한 연속 호출 제한 준수.',
+      endpointInfo:
+        process.env.NANET_API_ENDPOINT?.trim() ||
+        'https://apis.data.go.kr/9720000/searchservice/basic',
+    },
+    {
+      id: 'nl',
+      name: '국립중앙도서관 Open API',
+      scope: 'domestic',
+      envVar: 'NL_API_KEY',
+      configured: nlConfigured,
+      status: 'planned',
+      stepLabel: '3단계 예정',
+      storagePermission: 'metadata_and_link',
+      aiProcessingPermission: 'abstract_or_open_fulltext_only',
+      termsSummary: '학위논문·학술지 서지 조회 (국립중앙도서관 인증키 승인 후 연동 예정).',
+      endpointInfo: 'https://www.nl.go.kr/NL/search/openApi/search.do',
+    },
+    {
+      id: 'openalex',
+      name: 'OpenAlex API',
+      scope: 'international',
+      envVar: 'OPENALEX_API_KEY',
+      configured: true,
+      status: 'connected',
+      stepLabel: '연동 중',
+      storagePermission: 'open_metadata_and_abstract',
+      aiProcessingPermission: 'allowed_open_abstract',
+      termsSummary: 'CC0 공개 메타데이터·초록(inverted index) 저장 및 AI 분석 허용.',
+      endpointInfo: 'https://api.openalex.org/works',
+    },
+    {
+      id: 'crossref',
+      name: 'Crossref REST API',
+      scope: 'international',
+      configured: true,
+      status: 'connected',
+      stepLabel: '연동 중',
+      storagePermission: 'open_metadata_and_abstract',
+      aiProcessingPermission: 'allowed_open_abstract',
+      termsSummary: 'DOI·학술지·발행일 서지정보 보완 및 공개 메타데이터 활용 허용.',
+      endpointInfo: 'https://api.crossref.org/works',
+    },
+    {
+      id: 'dbpia',
+      name: 'DBpia Open API',
+      scope: 'domestic',
+      envVar: 'DBPIA_API_KEY',
+      configured: dbpiaConfigured,
+      status: 'planned',
+      stepLabel: '5단계 예정',
+      storagePermission: 'search_only_link',
+      aiProcessingPermission: 'prohibited_without_license',
+      termsSummary:
+        '약관상 대량·주기적 영구 저장 및 무단 전재 금지(원문 미제공). 실시간 검색 및 DBpia 랜딩 연결 전용.',
+      endpointInfo: 'https://api.dbpia.co.kr/v2/search/search.xml',
+    },
+  ];
+}
+
+function extractXmlTag(block: string, tagNames: string[]): string {
+  for (const tag of tagNames) {
+    const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
+    const match = block.match(regex);
+    if (match && match[1]) {
+      const cdataStripped = match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+      const cleaned = stripTags(cdataStripped);
+      if (cleaned) return cleaned;
+    }
+  }
+  return '';
+}
+
+function parseNanetXmlResponse(xmlText: string): {
+  resultCode: string;
+  resultMsg: string;
+  totalCount: number;
+  items: NanetPaperPreview[];
+} {
+  const resultCode = extractXmlTag(xmlText, ['resultCode', 'RESULT_CODE', 'errCd']);
+  const resultMsg = extractXmlTag(xmlText, ['resultMsg', 'RESULT_MSG', 'errMsg', 'returnAuthMsg']);
+  const totalRaw = extractXmlTag(xmlText, ['total', 'totalCount', 'TOTAL_COUNT']);
+  const totalCount = Number.parseInt(totalRaw || '0', 10) || 0;
+
+  const itemBlocks = xmlText.match(/<(?:item|RECORD)\b[^>]*>[\s\S]*?<\/(?:item|RECORD)>/gi) || [];
+  const items: NanetPaperPreview[] = [];
+
+  for (const block of itemBlocks) {
+    const title = extractXmlTag(block, ['title', 'TITLE', 'articleTitle', 'name']);
+    if (!title) continue;
+    const cn =
+      extractXmlTag(block, ['cn', 'CN', 'controlNo', 'id']) ||
+      makeSafePaperId('', '', title);
+    const authorRaw = extractXmlTag(block, ['author', 'AUTHOR', 'researcher', 'RESEARCHER', 'writer']);
+    const authors = authorRaw
+      ? authorRaw
+          .split(/[,;/|]/)
+          .map((a) => a.trim())
+          .filter(Boolean)
+          .slice(0, 12)
+      : ['저자 정보 미제공'];
+    const journalName =
+      extractXmlTag(block, ['publisher', 'PUBLISHER', 'journal', 'JOURNAL_NM', 'pub', 'source']) ||
+      '국회도서관 등재 자료';
+    const publicationDate =
+      extractXmlTag(block, ['pubyear', 'PUB_DATE', 'pubDate', 'regDate', 'year']) || '';
+    const materialType =
+      extractXmlTag(block, ['kn', 'gubun', 'className', 'materialType']) || '학술자료';
+    const detailUrl =
+      extractXmlTag(block, ['detailUrl', 'DETAIL_URL', 'url', 'link']) ||
+      `https://dl.nanet.go.kr/detail.do?cn=${encodeURIComponent(cn)}`;
+
+    items.push({
+      sourceId: cn,
+      title: title.slice(0, 280),
+      authors,
+      journalName: journalName.slice(0, 180),
+      publicationDate: publicationDate.slice(0, 20),
+      materialType: materialType.slice(0, 60),
+      paperUrl: detailUrl.slice(0, 480),
+      sourceName: '국회도서관 Open API',
+      country: 'KR',
+      region: 'domestic',
+      dataAvailability: 'metadata_only',
+      storagePermission: 'metadata_and_link',
+      aiProcessingPermission: 'abstract_or_open_fulltext_only',
+    });
+  }
+
+  return { resultCode, resultMsg, totalCount, items };
+}
+
+function parseNanetJsonResponse(rawJson: unknown): {
+  resultCode: string;
+  resultMsg: string;
+  totalCount: number;
+  items: NanetPaperPreview[];
+} {
+  const root = rawJson as Record<string, unknown>;
+  const response = (root?.response as Record<string, unknown>) || root;
+  const header = (response?.header as Record<string, unknown>) || {};
+  const body = (response?.body as Record<string, unknown>) || response;
+
+  const resultCode = String(header.resultCode || root?.RESULT_CODE || '');
+  const resultMsg = String(header.resultMsg || root?.ERROR_MESSAGE || '');
+  const totalCount = Number(body?.totalCount ?? body?.total ?? root?.TOTAL_COUNT ?? 0) || 0;
+
+  const itemsContainer = (body?.items as Record<string, unknown>) || body;
+  const rawList = Array.isArray(itemsContainer?.item)
+    ? itemsContainer.item
+    : Array.isArray(body?.items)
+      ? body.items
+      : Array.isArray(root?.RECORD)
+        ? root.RECORD
+        : itemsContainer?.item
+          ? [itemsContainer.item]
+          : [];
+
+  const items: NanetPaperPreview[] = [];
+  for (const row of rawList as Array<Record<string, unknown>>) {
+    const title = stripTags(String(row.title || row.TITLE || row.articleTitle || ''));
+    if (!title) continue;
+    const cn = String(row.cn || row.CN || row.controlNo || makeSafePaperId('', '', title));
+    const authorStr = stripTags(String(row.author || row.AUTHOR || row.RESEARCHER || ''));
+    const authors = authorStr
+      ? authorStr
+          .split(/[,;/|]/)
+          .map((a) => a.trim())
+          .filter(Boolean)
+          .slice(0, 12)
+      : ['저자 정보 미제공'];
+    const journalName =
+      stripTags(String(row.publisher || row.PUBLISHER || row.journal || row.JOURNAL_NM || '')) ||
+      '국회도서관 등재 자료';
+    const publicationDate = String(row.pubyear || row.PUB_DATE || row.pubDate || '').slice(0, 20);
+    const materialType = String(row.kn || row.gubun || row.className || '학술자료').slice(0, 60);
+    const detailUrl =
+      String(row.detailUrl || row.DETAIL_URL || row.url || '').trim() ||
+      `https://dl.nanet.go.kr/detail.do?cn=${encodeURIComponent(cn)}`;
+
+    items.push({
+      sourceId: cn,
+      title: title.slice(0, 280),
+      authors,
+      journalName: journalName.slice(0, 180),
+      publicationDate,
+      materialType,
+      paperUrl: detailUrl.slice(0, 480),
+      sourceName: '국회도서관 Open API',
+      country: 'KR',
+      region: 'domestic',
+      dataAvailability: 'metadata_only',
+      storagePermission: 'metadata_and_link',
+      aiProcessingPermission: 'abstract_or_open_fulltext_only',
+    });
+  }
+
+  return { resultCode, resultMsg, totalCount, items };
+}
+
+async function searchNanetOpenApi(params: {
+  query: string;
+  pageNo?: number;
+  displayLines?: number;
+}) {
+  const apiKey = process.env.NANET_API_KEY?.trim();
+  const endpoint =
+    process.env.NANET_API_ENDPOINT?.trim() ||
+    'https://apis.data.go.kr/9720000/searchservice/basic';
+  const cleanQuery = params.query.trim() || '청소년지도';
+  const pageNo = Math.max(1, Number(params.pageNo || 1));
+  const displayLines = Math.min(Math.max(1, Number(params.displayLines || 10)), 30);
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      configured: false,
+      status: 'ready_needs_key' as const,
+      source: 'nanet',
+      query: cleanQuery,
+      endpoint,
+      totalCount: 0,
+      papers: [] as NanetPaperPreview[],
+      message:
+        '국회도서관 Open API 인증키(NANET_API_KEY)가 아직 설정되지 않아 연결 준비 상태입니다. 공공데이터포털(data.go.kr)에서 활용신청 후 AI Studio Settings > Secrets에 NANET_API_KEY를 등록하면 즉시 실데이터 검색이 동작합니다.',
+    };
+  }
+
+  const encodedServiceKey = /%[0-9A-Fa-f]{2}/.test(apiKey)
+    ? apiKey
+    : encodeURIComponent(apiKey);
+  const searchTerm = cleanQuery.includes(',') ? cleanQuery : `자료명,${cleanQuery}`;
+  const requestUrl =
+    `${endpoint}?serviceKey=${encodedServiceKey}` +
+    `&pageno=${pageNo}` +
+    `&displaylines=${displayLines}` +
+    `&search=${encodeURIComponent(searchTerm)}`;
+
+  const res = await fetch(requestUrl, {
+    headers: {
+      Accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
+      'User-Agent': POLITE_USER_AGENT,
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+
+  const rawBody = await res.text();
+  if (!res.ok) {
+    return {
+      ok: false,
+      configured: true,
+      status: 'api_error' as const,
+      source: 'nanet',
+      query: cleanQuery,
+      endpoint,
+      totalCount: 0,
+      papers: [] as NanetPaperPreview[],
+      message: `국회도서관 Open API 응답 오류 (HTTP ${res.status}): ${rawBody.slice(0, 180)}`,
+    };
+  }
+
+  const trimmed = rawBody.trim();
+  const parsed = trimmed.startsWith('{')
+    ? parseNanetJsonResponse(JSON.parse(trimmed))
+    : parseNanetXmlResponse(trimmed);
+
+  if (parsed.resultCode && !['0', '00', 'SUCCESS', 'INFO-000'].includes(parsed.resultCode.toUpperCase())) {
+    return {
+      ok: false,
+      configured: true,
+      status: 'api_error' as const,
+      source: 'nanet',
+      query: cleanQuery,
+      endpoint,
+      totalCount: 0,
+      papers: [] as NanetPaperPreview[],
+      message: `국회도서관 Open API 오류 (${parsed.resultCode}): ${parsed.resultMsg || '인증키 또는 요청 파라미터를 확인해 주세요.'}`,
+    };
+  }
+
+  return {
+    ok: true,
+    configured: true,
+    status: 'connected' as const,
+    source: 'nanet',
+    query: cleanQuery,
+    endpoint,
+    totalCount: parsed.totalCount,
+    papers: parsed.items,
+    message: `국회도서관 Open API에서 "${cleanQuery}" 검색 결과 ${parsed.items.length}건(전체 ${parsed.totalCount}건)을 조회했습니다.`,
+  };
+}
+
 const LEGACY_CATEGORIES = [
   '청소년정책·제도',
   '상담·심리지원',
@@ -1288,9 +1663,52 @@ async function startServer() {
     res.json({
       ok: true,
       geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+      nanetConfigured: Boolean(process.env.NANET_API_KEY?.trim()),
       schedule: getKstScheduleInfo(),
       timestamp: new Date().toISOString(),
     });
+  });
+
+  app.get('/api/sources/status', (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      sources: buildAcademicSourcesStatus(),
+      koreanKeywords: {
+        core: [...CORE_KOREAN_KEYWORDS],
+        extended: [...EXTENDED_KOREAN_KEYWORDS],
+        totalCount: CORE_KOREAN_KEYWORDS.length + EXTENDED_KOREAN_KEYWORDS.length,
+      },
+      checkedAtIso: new Date().toISOString(),
+    });
+  });
+
+  app.post('/api/sources/nanet/search', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        query?: string;
+        pageNo?: number;
+        displayLines?: number;
+      };
+      const result = await searchNanetOpenApi({
+        query: typeof body.query === 'string' ? body.query : '청소년지도',
+        pageNo: body.pageNo,
+        displayLines: body.displayLines,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(502).json({
+        ok: false,
+        configured: Boolean(process.env.NANET_API_KEY?.trim()),
+        status: 'api_error',
+        source: 'nanet',
+        papers: [],
+        totalCount: 0,
+        message:
+          err instanceof Error
+            ? `국회도서관 API 호출 중 네트워크 오류가 발생했습니다: ${err.message}`
+            : '국회도서관 API 호출 중 오류가 발생했습니다.',
+      });
+    }
   });
 
   app.get('/api/papers/schedule-info', (_req: Request, res: Response) => {

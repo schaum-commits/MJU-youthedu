@@ -1362,3 +1362,167 @@ export async function togglePaperVisibility(paper: PaperRecord): Promise<void> {
     updatedAt: serverTimestamp(),
   });
 }
+
+export interface AcademicSourceStatus {
+  id: 'nanet' | 'nl' | 'dbpia' | 'openalex' | 'crossref';
+  name: string;
+  scope: 'domestic' | 'international';
+  envVar?: string;
+  configured: boolean;
+  status: 'connected' | 'ready_needs_key' | 'planned';
+  stepLabel: string;
+  storagePermission: string;
+  aiProcessingPermission: string;
+  termsSummary: string;
+  endpointInfo: string;
+}
+
+export interface AcademicSourcesStatusResponse {
+  ok: boolean;
+  serverAvailable: boolean;
+  sources: AcademicSourceStatus[];
+  koreanKeywords: {
+    core: string[];
+    extended: string[];
+    totalCount: number;
+  };
+}
+
+export interface NanetPaperPreview {
+  sourceId: string;
+  title: string;
+  authors: string[];
+  journalName: string;
+  publicationDate: string;
+  materialType: string;
+  paperUrl: string;
+  sourceName: string;
+  country: 'KR';
+  region: 'domestic';
+  dataAvailability: 'metadata_only';
+  storagePermission: 'metadata_and_link';
+  aiProcessingPermission: 'abstract_or_open_fulltext_only';
+}
+
+export interface NanetSearchTestResult {
+  ok: boolean;
+  configured: boolean;
+  status: 'connected' | 'ready_needs_key' | 'api_error' | 'static_hosting';
+  source: string;
+  query: string;
+  endpoint?: string;
+  totalCount: number;
+  papers: NanetPaperPreview[];
+  message: string;
+}
+
+export async function fetchAcademicSourcesStatus(): Promise<AcademicSourcesStatusResponse> {
+  try {
+    const res = await fetch(resolveApiUrl('/api/sources/status'));
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok || !contentType.includes('application/json')) {
+      throw new Error('STATIC_HOSTING');
+    }
+    const data = (await res.json()) as {
+      ok: boolean;
+      sources: AcademicSourceStatus[];
+      koreanKeywords: { core: string[]; extended: string[]; totalCount: number };
+    };
+    return {
+      ok: true,
+      serverAvailable: true,
+      sources: data.sources || [],
+      koreanKeywords: data.koreanKeywords || { core: [], extended: [], totalCount: 0 },
+    };
+  } catch {
+    return {
+      ok: false,
+      serverAvailable: false,
+      sources: [
+        {
+          id: 'nanet',
+          name: '국회도서관 국가학술정보 · 자료검색 Open API',
+          scope: 'domestic',
+          envVar: 'NANET_API_KEY',
+          configured: false,
+          status: 'ready_needs_key',
+          stepLabel: '2단계 (서버 연결 필요)',
+          storagePermission: 'metadata_and_link',
+          aiProcessingPermission: 'abstract_or_open_fulltext_only',
+          termsSummary:
+            '정적 호스팅 환경에서는 서버 전용 API 키 상태를 조회할 수 없습니다. AI Studio 서버 환경에서 확인하세요.',
+          endpointInfo: 'https://apis.data.go.kr/9720000/searchservice/basic',
+        },
+        {
+          id: 'openalex',
+          name: 'OpenAlex API',
+          scope: 'international',
+          configured: true,
+          status: 'connected',
+          stepLabel: '연동 중 (CORS)',
+          storagePermission: 'open_metadata_and_abstract',
+          aiProcessingPermission: 'allowed_open_abstract',
+          termsSummary: '공개 학술 메타데이터·초록 직접 수집 가능.',
+          endpointInfo: 'https://api.openalex.org/works',
+        },
+        {
+          id: 'crossref',
+          name: 'Crossref REST API',
+          scope: 'international',
+          configured: true,
+          status: 'connected',
+          stepLabel: '연동 중 (CORS)',
+          storagePermission: 'open_metadata_and_abstract',
+          aiProcessingPermission: 'allowed_open_abstract',
+          termsSummary: 'DOI·서지정보 보완 가능.',
+          endpointInfo: 'https://api.crossref.org/works',
+        },
+      ],
+      koreanKeywords: { core: [], extended: [], totalCount: 0 },
+    };
+  }
+}
+
+export async function testNanetPaperSearch(
+  query: string,
+  pageNo = 1,
+  displayLines = 10
+): Promise<NanetSearchTestResult> {
+  try {
+    const res = await fetch(resolveApiUrl('/api/sources/nanet/search'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, pageNo, displayLines }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return {
+        ok: false,
+        configured: false,
+        status: 'static_hosting',
+        source: 'nanet',
+        query,
+        totalCount: 0,
+        papers: [],
+        message:
+          '현재 정적 호스팅 환경에서는 국회도서관 Open API 프록시 서버를 호출할 수 없습니다. AI Studio 서버 환경 또는 VITE_API_BASE_URL 서버 연결 상태에서 테스트해 주세요.',
+      };
+    }
+    return (await res.json()) as NanetSearchTestResult;
+  } catch (error) {
+    return {
+      ok: false,
+      configured: false,
+      status: 'api_error',
+      source: 'nanet',
+      query,
+      totalCount: 0,
+      papers: [],
+      message:
+        error instanceof Error
+          ? `국회도서관 API 테스트 요청 실패: ${error.message}`
+          : '국회도서관 API 테스트 요청에 실패했습니다.',
+    };
+  }
+}
+

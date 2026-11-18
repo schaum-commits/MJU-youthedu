@@ -4,14 +4,10 @@
  */
 
 import React, { Component, useEffect, useRef, useState } from 'react';
-import { collection, doc, getDocs, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from './lib/firebase';
-import {
-  checkResearchServerAvailable,
-  RESEARCH_SYNC_INTERVAL_MS,
-  runResearchSync,
-} from './lib/researchSync';
+import { checkResearchServerAvailable } from './lib/researchSync';
 import {
   collectAndAnalyzePapers,
   isMonthlySyncDue,
@@ -26,7 +22,6 @@ import {
   PaperRecord,
   PublicSettings,
   ResearchSyncStatus,
-  ResearchTrend,
   resolveKakaoChatUrl,
 } from './types/community';
 import { NotionSidebar } from './components/NotionSidebar';
@@ -35,7 +30,6 @@ import { MembershipApplicationModal } from './components/MembershipApplicationMo
 import { HomePage } from './components/HomePage';
 import { ActivitiesPage } from './components/ActivitiesPage';
 import { MemberBoardPage } from './components/MemberBoardPage';
-import { ResearchTrendsPage } from './components/ResearchTrendsPage';
 import { YouthResearchTrendsPage } from './components/YouthResearchTrendsPage';
 import { KakaoLoungePage } from './components/KakaoLoungePage';
 import { MemberDirectoryPage } from './components/MemberDirectoryPage';
@@ -101,7 +95,6 @@ function WorkspaceShell() {
   const [kakaoChatUrl, setKakaoChatUrl] = useState(DEFAULT_KAKAO_CHAT_URL);
   const [researchSyncStatus, setResearchSyncStatus] = useState<ResearchSyncStatus | null>(null);
   const [researchSyncLoaded, setResearchSyncLoaded] = useState(false);
-  const autoSyncAttemptedRef = useRef(false);
   const [papers, setPapers] = useState<PaperRecord[]>([]);
   const [papersLoaded, setPapersLoaded] = useState(false);
   const [monthlyReports, setMonthlyReports] = useState<MonthlyTrendReport[]>([]);
@@ -246,51 +239,10 @@ function WorkspaceShell() {
 
   useEffect(() => {
     if (!authUser) {
-      autoSyncAttemptedRef.current = false;
       monthlyAutoAttemptedRef.current = false;
       return;
     }
-    if (!authReady || !isAdmin || !researchSyncLoaded || autoSyncAttemptedRef.current) {
-      return;
-    }
-
-    const lastSyncedMs = researchSyncStatus?.lastSyncedAt?.toMillis?.() ?? null;
-    const isInitialSyncNeeded = !researchSyncStatus || lastSyncedMs === null;
-    const isBiweeklyDue =
-      Boolean(researchSyncStatus?.autoEnabled !== false) &&
-      lastSyncedMs !== null &&
-      Date.now() - lastSyncedMs >= RESEARCH_SYNC_INTERVAL_MS;
-
-    if (!isInitialSyncNeeded && !isBiweeklyDue) {
-      return;
-    }
-
-    autoSyncAttemptedRef.current = true;
-    const mode = isInitialSyncNeeded ? 'initial_1y' : 'biweekly';
-
-    void (async () => {
-      const serverAvailable = await checkResearchServerAvailable();
-      if (!serverAvailable) return;
-
-      try {
-        const trendsSnap = await getDocs(collection(db, 'researchTrends'));
-        const existingTrends = trendsSnap.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as Omit<ResearchTrend, 'id'>),
-        }));
-        await runResearchSync({
-          mode,
-          authUser,
-          actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
-          existingTrends,
-          autoEnabled: researchSyncStatus?.autoEnabled ?? true,
-          currentStatus: researchSyncStatus,
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, 'researchTrends');
-      }
-    })();
-  }, [authReady, authUser, isAdmin, profile, researchSyncLoaded, researchSyncStatus]);
+  }, [authUser]);
 
   useEffect(() => {
     if (!authUser || !authReady || !isAdmin || !researchSyncLoaded || !papersLoaded) {
@@ -390,14 +342,6 @@ function WorkspaceShell() {
 
           {activeTab === 'board' && (
             <MemberBoardPage
-              onOpenApplicationModal={() => setApplicationModalOpen(true)}
-              onNavigate={setActiveTab}
-            />
-          )}
-
-          {activeTab === 'trends' && (
-            <ResearchTrendsPage
-              researchSyncStatus={researchSyncStatus}
               onOpenApplicationModal={() => setApplicationModalOpen(true)}
               onNavigate={setActiveTab}
             />

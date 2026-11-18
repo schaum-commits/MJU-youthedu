@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   ArrowRight,
-  BookOpen,
   CalendarDays,
   FileText,
   GraduationCap,
@@ -168,7 +167,7 @@ export function HomePage({
               <div className="space-y-1.5">
                 <p>
                   {settings.executiveNotice ||
-                    '원우회 회원 가입 신청 후 관리자의 회원 인증이 완료되면 게시판, 연구 동향 아카이브, 카카오톡 오픈채팅방 링크를 모두 이용하실 수 있습니다.'}
+                    '원우회 회원 가입 신청 후 관리자의 회원 인증이 완료되면 게시판, 원우 네트워크, 카카오톡 오픈채팅방 링크를 모두 이용하실 수 있습니다.'}
                 </p>
                 <p className="text-xs text-stone-600">
                   가입 절차: Google 계정 로그인 → 회원 가입 신청서(성명·학번·입학년도/학기) 제출 → 원우회 관리자 확인 후 회원 인증 완료
@@ -255,22 +254,18 @@ export function HomePage({
 
             <button
               type="button"
-              onClick={() => onNavigate('trends')}
+              onClick={() => onNavigate('youthTrends')}
               className="group text-left rounded-lg border border-stone-200 bg-white hover:bg-[#F7F6F3] p-4 transition-colors cursor-pointer"
             >
               <div className="flex items-center justify-between mb-1.5">
                 <span className="inline-flex items-center gap-2 text-sm font-semibold text-stone-900">
-                  <BookOpen className="w-4 h-4 text-[#002968]" />
-                  연구 동향 공유 아카이브
+                  <Sparkles className="w-4 h-4 text-[#002968]" />
+                  청소년지도 최신 연구동향
                 </span>
-                {isApprovedMember ? (
-                  <ArrowRight className="w-4 h-4 text-stone-400 group-hover:translate-x-0.5 transition-transform" />
-                ) : (
-                  <Lock className="w-3.5 h-3.5 text-stone-400" />
-                )}
+                <ArrowRight className="w-4 h-4 text-stone-400 group-hover:translate-x-0.5 transition-transform" />
               </div>
               <p className="text-xs text-stone-600 leading-relaxed">
-                청소년 정책 보고서, 학술 논문 요약, 학회 및 공모전 소식을 원우들과 공유합니다.
+                국내외 학술 데이터베이스에서 수집한 청소년지도 최신 논문과 Gemini AI 분석 요약을 확인합니다.
               </p>
             </button>
 
