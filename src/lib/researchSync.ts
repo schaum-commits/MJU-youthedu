@@ -193,7 +193,10 @@ export async function runResearchSync({
           intervalDays: RESEARCH_SYNC_INTERVAL_DAYS,
           ...(currentStatus?.lastSyncedAt ? { lastSyncedAt: currentStatus.lastSyncedAt } : {}),
           ...(currentStatus?.nextSyncAt ? { nextSyncAt: currentStatus.nextSyncAt } : {}),
-          lastSyncStatus: currentStatus?.lastSyncedAt ? currentStatus.lastSyncStatus : 'error',
+          lastSyncStatus:
+            currentStatus?.lastSyncedAt && currentStatus.lastSyncStatus !== 'syncing'
+              ? currentStatus.lastSyncStatus
+              : 'error',
           lastSyncMode: mode,
           lastSyncCount: currentStatus?.lastSyncCount ?? 0,
           lastSyncMessage: staticMessage.slice(0, 400),

@@ -20,6 +20,8 @@ import {
   collectAndAnalyzePapers,
   generateMonthlyTrendReport,
   getKstScheduleContext,
+  isSyncActivelyRunning,
+  retryFailedPapers,
 } from '../lib/youthPaperSync';
 import {
   MonthlyTrendReport,
@@ -52,11 +54,13 @@ export function YouthResearchTrendsPage({
   const [viewMode, setViewMode] = useState<SubViewMode>('papers');
   const [selectedCategory, setSelectedCategory] = useState<'전체' | YouthResearchCategory>('전체');
   const [regionFilter, setRegionFilter] = useState<'all' | 'domestic' | 'international'>('all');
+  const [periodFilter, setPeriodFilter] = useState<'all' | '3m' | '6m' | '12m'>('all');
   const [yearFilter, setYearFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPaper, setSelectedPaper] = useState<PaperRecord | null>(null);
   const [selectedReportId, setSelectedReportId] = useState<string>('');
-  const [manualSyncRunning, setManualSyncRunning] = useState(false);
+  const [runningLookback, setRunningLookback] = useState<3 | 12 | null>(null);
+  const [retryingAnalysis, setRetryingAnalysis] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [actionBanner, setActionBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(
     null
@@ -69,9 +73,14 @@ export function YouthResearchTrendsPage({
     const now = new Date();
     const oneYearAgo = new Date(now);
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    const cutoffIso = oneYearAgo.toISOString().slice(0, 10);
+    const cutoff12mIso = oneYearAgo.toISOString().slice(0, 10);
 
-    const recent12MonthsPapers = papers.filter((p) => (p.publicationDate || '') >= cutoffIso);
+    const threeMonthsAgo = new Date(now);
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const cutoff3mIso = threeMonthsAgo.toISOString().slice(0, 10);
+
+    const recent12MonthsPapers = papers.filter((p) => (p.publicationDate || '') >= cutoff12mIso);
+    const recent3MonthsPapers = papers.filter((p) => (p.publicationDate || '') >= cutoff3mIso);
     const currentMonthPrefix = kstContext.currentMonthKey; // YYYY-MM
 
     const monthlyNewCount = papers.filter((p) => {
@@ -106,6 +115,7 @@ export function YouthResearchTrendsPage({
     return {
       totalCount: papers.length,
       recent12MonthsCount: recent12MonthsPapers.length,
+      recent3MonthsCount: recent3MonthsPapers.length,
       monthlyNewCount,
       domesticCount,
       internationalCount,
@@ -124,8 +134,20 @@ export function YouthResearchTrendsPage({
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [papers]);
 
+  const pendingOrFailedPapers = useMemo(
+    () => papers.filter((p) => p.analysisStatus === 'failed' || p.analysisStatus === 'pending'),
+    [papers]
+  );
+
   const filteredPapers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    let periodCutoffIso = '';
+    if (periodFilter !== 'all') {
+      const monthsBack = periodFilter === '3m' ? 3 : periodFilter === '6m' ? 6 : 12;
+      const d = new Date();
+      d.setMonth(d.getMonth() - monthsBack);
+      periodCutoffIso = d.toISOString().slice(0, 10);
+    }
     return papers.filter((p) => {
       if (selectedCategory !== '전체') {
         const matchesMain = p.mainCategory === selectedCategory;
@@ -133,6 +155,7 @@ export function YouthResearchTrendsPage({
         if (!matchesMain && !matchesRelated) return false;
       }
       if (regionFilter !== 'all' && p.region !== regionFilter) return false;
+      if (periodCutoffIso && (p.publicationDate || '') < periodCutoffIso) return false;
       if (yearFilter !== 'all' && !(p.publicationDate || '').startsWith(yearFilter)) {
         return false;
       }
@@ -143,6 +166,7 @@ export function YouthResearchTrendsPage({
           p.journalName,
           ...(p.keywords || []),
           p.easySummary || '',
+          p.abstract || '',
           p.mainCategory,
         ]
           .join(' ')
@@ -151,7 +175,7 @@ export function YouthResearchTrendsPage({
       }
       return true;
     });
-  }, [papers, selectedCategory, regionFilter, yearFilter, searchQuery]);
+  }, [papers, selectedCategory, regionFilter, periodFilter, yearFilter, searchQuery]);
 
   const activeReport = useMemo(() => {
     if (monthlyReports.length === 0) return null;
@@ -161,9 +185,12 @@ export function YouthResearchTrendsPage({
     return monthlyReports[0];
   }, [monthlyReports, selectedReportId]);
 
-  const handleRunManualSync = async () => {
-    if (!authUser || manualSyncRunning) return;
-    setManualSyncRunning(true);
+  const isSyncRunning =
+    runningLookback !== null || isSyncActivelyRunning(researchSyncStatus);
+
+  const handleRunManualSync = async (lookbackMonths: 3 | 12) => {
+    if (!authUser || isSyncRunning) return;
+    setRunningLookback(lookbackMonths);
     setActionBanner(null);
     try {
       const result = await collectAndAnalyzePapers({
@@ -173,7 +200,8 @@ export function YouthResearchTrendsPage({
         existingPapers: papers,
         autoEnabled: researchSyncStatus?.autoEnabled ?? true,
         currentStatus: researchSyncStatus,
-        perCategoryLimit: 3,
+        lookbackMonths,
+        perCategoryLimit: lookbackMonths === 3 ? 4 : 3,
         generateReportToo: true,
       });
       setActionBanner({
@@ -181,7 +209,26 @@ export function YouthResearchTrendsPage({
         text: result.message,
       });
     } finally {
-      setManualSyncRunning(false);
+      setRunningLookback(null);
+    }
+  };
+
+  const handleRunPendingAiAnalysis = async () => {
+    if (!authUser || retryingAnalysis || pendingOrFailedPapers.length === 0) return;
+    setRetryingAnalysis(true);
+    setActionBanner(null);
+    try {
+      const result = await retryFailedPapers({
+        failedPapers: pendingOrFailedPapers,
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+      });
+      setActionBanner({
+        type: result.ok ? 'ok' : 'err',
+        text: result.message,
+      });
+    } finally {
+      setRetryingAnalysis(false);
     }
   };
 
@@ -204,9 +251,6 @@ export function YouthResearchTrendsPage({
       setGeneratingReport(false);
     }
   };
-
-  const isSyncRunning =
-    manualSyncRunning || researchSyncStatus?.lastSyncStatus === 'syncing';
 
   return (
     <div className="max-w-5xl mx-auto px-5 sm:px-10 py-8 sm:py-10 space-y-8">
@@ -254,15 +298,47 @@ export function YouthResearchTrendsPage({
           </div>
 
           {isAdmin && (
-            <button
-              type="button"
-              onClick={handleRunManualSync}
-              disabled={isSyncRunning}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncRunning ? 'animate-spin' : ''}`} />
-              {isSyncRunning ? '수집·AI 분석 중...' : '최신 논문 수집·분석'}
-            </button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleRunManualSync(3)}
+                disabled={isSyncRunning}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${runningLookback === 3 || isSyncRunning ? 'animate-spin' : ''}`}
+                />
+                {runningLookback === 3
+                  ? '3개월 수집·분석 중...'
+                  : isSyncRunning
+                    ? '수집 진행 중...'
+                    : '최근 3개월 업데이트'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRunManualSync(12)}
+                disabled={isSyncRunning}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${runningLookback === 12 ? 'animate-spin' : ''}`}
+                />
+                {runningLookback === 12 ? '1년 수집 중...' : '최근 1년 수집'}
+              </button>
+              {pendingOrFailedPapers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleRunPendingAiAnalysis}
+                  disabled={retryingAnalysis || isSyncRunning}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-[#002968] bg-[#F4F7FB] border border-[#D5DFEE] hover:bg-[#E9EFF8] disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {retryingAnalysis
+                    ? 'AI 분석 중...'
+                    : `AI 분석 대기·실패 (${pendingOrFailedPapers.length}편) 실행`}
+                </button>
+              )}
+            </div>
           )}
         </div>
       </header>
@@ -290,8 +366,11 @@ export function YouthResearchTrendsPage({
                 <p className="text-2xl font-bold text-stone-900 tabular-nums mt-1">
                   {dashboardStats.recent12MonthsCount}
                   <span className="text-xs font-normal text-stone-500 ml-1">
-                    편 (전체 {dashboardStats.totalCount}편)
+                    편
                   </span>
+                </p>
+                <p className="text-[11px] text-stone-500 mt-0.5 tabular-nums">
+                  최근 3개월 {dashboardStats.recent3MonthsCount}편 · 전체 {dashboardStats.totalCount}편
                 </p>
               </div>
               <div className="rounded-lg border border-stone-200 bg-[#F7F6F3] p-4">
@@ -318,7 +397,9 @@ export function YouthResearchTrendsPage({
                     : '초기 수집 대기 중'}
                 </p>
                 <p className="text-[11px] text-stone-500 mt-0.5 truncate">
-                  매월 1일 03:00 (Asia/Seoul) 자동 갱신
+                  {researchSyncStatus?.windowLabel
+                    ? `수집 범위: ${researchSyncStatus.windowLabel}`
+                    : '매월 1일 03:00 (Asia/Seoul) 자동 갱신'}
                 </p>
               </div>
             </div>
@@ -460,6 +541,20 @@ export function YouthResearchTrendsPage({
                 </select>
 
                 <select
+                  aria-label="수집 기간 선택"
+                  value={periodFilter}
+                  onChange={(e) =>
+                    setPeriodFilter(e.target.value as 'all' | '3m' | '6m' | '12m')
+                  }
+                  className="px-3 py-2 text-xs font-medium border border-stone-200 rounded-lg bg-white text-stone-700"
+                >
+                  <option value="all">발행 기간 전체</option>
+                  <option value="3m">최근 3개월</option>
+                  <option value="6m">최근 6개월</option>
+                  <option value="12m">최근 12개월</option>
+                </select>
+
+                <select
                   aria-label="발행연도 선택"
                   value={yearFilter}
                   onChange={(e) => setYearFilter(e.target.value)}
@@ -479,9 +574,12 @@ export function YouthResearchTrendsPage({
               <span>
                 검색 결과 <strong className="text-stone-900 tabular-nums">{filteredPapers.length}</strong>편
                 {selectedCategory !== '전체' && ` · 분야: ${selectedCategory}`}
+                {periodFilter !== 'all' &&
+                  ` · 기간: ${periodFilter === '3m' ? '최근 3개월' : periodFilter === '6m' ? '최근 6개월' : '최근 12개월'}`}
               </span>
               {(selectedCategory !== '전체' ||
                 regionFilter !== 'all' ||
+                periodFilter !== 'all' ||
                 yearFilter !== 'all' ||
                 searchQuery) && (
                 <button
@@ -489,6 +587,7 @@ export function YouthResearchTrendsPage({
                   onClick={() => {
                     setSelectedCategory('전체');
                     setRegionFilter('all');
+                    setPeriodFilter('all');
                     setYearFilter('all');
                     setSearchQuery('');
                   }}
@@ -512,8 +611,8 @@ export function YouthResearchTrendsPage({
                     </p>
                     <p className="text-xs text-stone-600 max-w-md mx-auto leading-relaxed">
                       {isAdmin
-                        ? '상단의 [최신 논문 수집·분석] 버튼을 누르시면 OpenAlex 및 Crossref에서 최근 12개월 논문을 수집하여 Gemini AI로 자동 분류·요약합니다.'
-                        : '관리자가 OpenAlex·Crossref 월간 논문 수집을 실행하면 이곳에 최신 연구동향이 표시됩니다.'}
+                        ? '상단의 [최근 3개월 업데이트] 또는 [최근 1년 수집] 버튼을 누르시면 OpenAlex 및 Crossref에서 국내외 논문을 수집합니다.'
+                        : '관리자가 OpenAlex·Crossref 논문 수집을 실행하면 이곳에 최신 연구동향이 표시됩니다.'}
                     </p>
                   </>
                 ) : (
@@ -554,8 +653,20 @@ export function YouthResearchTrendsPage({
                         )}
                       </div>
 
-                      <span className="text-[11px] text-stone-500">
-                        {paper.analysisBasis}
+                      <span
+                        className={`text-[11px] font-medium ${
+                          paper.analysisStatus === 'pending'
+                            ? 'text-amber-700'
+                            : paper.analysisStatus === 'failed'
+                              ? 'text-red-700'
+                              : 'text-stone-500'
+                        }`}
+                      >
+                        {paper.analysisStatus === 'pending'
+                          ? 'AI 요약 대기 (서지·초록 수집됨)'
+                          : paper.analysisStatus === 'failed'
+                            ? 'AI 분석 오류'
+                            : paper.analysisBasis}
                       </span>
                     </div>
 
@@ -607,7 +718,9 @@ export function YouthResearchTrendsPage({
                         className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#002968] hover:underline cursor-pointer"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
-                        AI 연구 요약 · 시사점 상세 보기
+                        {paper.analysisStatus === 'completed'
+                          ? 'AI 연구 요약 · 시사점 상세 보기'
+                          : '서지 · 초록 상세 보기'}
                       </button>
 
                       <div className="flex flex-wrap items-center gap-3 text-xs">
@@ -839,9 +952,17 @@ export function YouthResearchTrendsPage({
               </p>
             </NotionCallout>
 
-            {selectedPaper.analysisStatus === 'failed' ? (
+            {selectedPaper.analysisStatus === 'pending' ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-1">
-                <p className="font-semibold">AI 상세 분석 대기/실패 상태</p>
+                <p className="font-semibold">AI 상세 요약 대기 중 (서지정보 및 초록 수집 완료)</p>
+                <p>
+                  {selectedPaper.analysisError ||
+                    '정적 호스팅(GitHub Pages) 환경에서 OpenAlex·Crossref 서지 및 초록이 먼저 저장되었습니다. AI Studio 서버 환경 또는 관리자 콘솔에서 [AI 분석 대기·실패 실행]을 누르면 Gemini AI 구조화 요약이 생성됩니다.'}
+                </p>
+              </div>
+            ) : selectedPaper.analysisStatus === 'failed' ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-xs text-red-900 space-y-1">
+                <p className="font-semibold">AI 상세 분석 오류</p>
                 <p>
                   {selectedPaper.analysisError ||
                     'AI 분석 과정에서 오류가 발생했습니다. 관리자 콘솔에서 실패 논문을 재분석할 수 있습니다.'}

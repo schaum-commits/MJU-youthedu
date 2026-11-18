@@ -15,6 +15,7 @@ import {
 import {
   collectAndAnalyzePapers,
   isMonthlySyncDue,
+  isSyncActivelyRunning,
 } from './lib/youthPaperSync';
 import {
   CommunityLinks,
@@ -295,7 +296,7 @@ function WorkspaceShell() {
     if (!authUser || !authReady || !isAdmin || !researchSyncLoaded || !papersLoaded) {
       return;
     }
-    if (monthlyAutoAttemptedRef.current) return;
+    if (monthlyAutoAttemptedRef.current || isSyncActivelyRunning(researchSyncStatus)) return;
     if (!isMonthlySyncDue({ researchSyncStatus, papersCount: papers.length })) {
       return;
     }
@@ -313,7 +314,8 @@ function WorkspaceShell() {
         existingPapers: papers,
         autoEnabled: researchSyncStatus?.autoEnabled ?? true,
         currentStatus: researchSyncStatus,
-        perCategoryLimit: 2,
+        lookbackMonths: 3,
+        perCategoryLimit: 3,
         generateReportToo: true,
       });
     })();

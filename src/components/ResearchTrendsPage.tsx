@@ -38,6 +38,7 @@ import {
   runResearchSync,
   toggleResearchAutoSync,
 } from '../lib/researchSync';
+import { isSyncActivelyRunning } from '../lib/youthPaperSync';
 import {
   formatAdmissionTerm,
   LIMITS,
@@ -413,7 +414,7 @@ export function ResearchTrendsPage({
   }, [researchSyncStatus, trends]);
 
   const isSyncCurrentlyRunning =
-    syncingMode !== null || researchSyncStatus?.lastSyncStatus === 'syncing';
+    syncingMode !== null || isSyncActivelyRunning(researchSyncStatus);
   const autoEnabled = researchSyncStatus?.autoEnabled !== false;
 
   const syncStatusMeta = useMemo(() => {

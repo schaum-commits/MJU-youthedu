@@ -222,13 +222,14 @@ function detectDomesticPaper(params: {
   return false;
 }
 
-function getLast12MonthsRange() {
+function getDateRangeByMonths(months: number) {
+  const safeMonths = Math.min(Math.max(Math.round(months || 12), 1), 24);
   const now = new Date();
   const toDate = now.toISOString().slice(0, 10);
   const from = new Date(now);
-  from.setFullYear(from.getFullYear() - 1);
+  from.setMonth(from.getMonth() - safeMonths);
   const fromDate = from.toISOString().slice(0, 10);
-  return { fromDate, toDate };
+  return { fromDate, toDate, lookbackMonths: safeMonths };
 }
 
 function getKstScheduleInfo() {
@@ -410,6 +411,7 @@ async function handleCollectPapers(req: Request, res: Response) {
     existingOpenAlexIds?: string[];
     existingTitles?: string[];
     perCategoryLimit?: number;
+    lookbackMonths?: number;
   };
 
   const existingDoiSet = new Set(
@@ -427,7 +429,9 @@ async function handleCollectPapers(req: Request, res: Response) {
   );
 
   const perCategoryLimit = Math.min(Math.max(Number(body.perCategoryLimit || 3), 1), 6);
-  const { fromDate, toDate } = getLast12MonthsRange();
+  const { fromDate, toDate, lookbackMonths } = getDateRangeByMonths(
+    Number(body.lookbackMonths || 12)
+  );
 
   let openAlexCalls = 0;
   let crossrefCalls = 0;
@@ -655,6 +659,7 @@ async function handleCollectPapers(req: Request, res: Response) {
       koreanCoverageNotice,
       fromDate,
       toDate,
+      lookbackMonths,
     },
   });
 }
@@ -1267,6 +1272,17 @@ async function handleLegacyResearchSync(req: Request, res: Response) {
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
+
+  app.use('/api', (req: Request, res: Response, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
 
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({

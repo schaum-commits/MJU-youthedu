@@ -53,6 +53,7 @@ import {
   collectAndAnalyzePapers,
   generateMonthlyTrendReport,
   getKstScheduleContext,
+  isSyncActivelyRunning,
   retryFailedPapers,
   togglePaperVisibility,
 } from '../lib/youthPaperSync';
@@ -121,7 +122,7 @@ export function AdminConsolePage({
 
   // Youth Research Automation State
   const [syncLogs, setSyncLogs] = useState<ResearchSyncLog[]>([]);
-  const [runningYouthSync, setRunningYouthSync] = useState(false);
+  const [runningYouthLookback, setRunningYouthLookback] = useState<3 | 12 | null>(null);
   const [retryingFailed, setRetryingFailed] = useState(false);
   const [generatingMonthlyReport, setGeneratingMonthlyReport] = useState(false);
   const [confirmDeletePaperId, setConfirmDeletePaperId] = useState<string | null>(null);
@@ -712,7 +713,7 @@ export function AdminConsolePage({
   };
 
   const handleAdminResearchSync = async (mode: 'initial_1y' | 'biweekly') => {
-    if (!authUser || syncingKciMode || researchSyncStatus?.lastSyncStatus === 'syncing') return;
+    if (!authUser || syncingKciMode || isSyncActivelyRunning(researchSyncStatus)) return;
     setSyncingKciMode(mode);
     try {
       const result = await runResearchSync({
@@ -753,8 +754,16 @@ export function AdminConsolePage({
 
   // Youth Research Trends Admin Actions
   const kstCtx = useMemo(() => getKstScheduleContext(), []);
-  const failedPapers = useMemo(
-    () => papers.filter((p) => p.analysisStatus === 'failed'),
+  const pendingOrFailedPapers = useMemo(
+    () => papers.filter((p) => p.analysisStatus === 'failed' || p.analysisStatus === 'pending'),
+    [papers]
+  );
+  const pendingPapersCount = useMemo(
+    () => papers.filter((p) => p.analysisStatus === 'pending').length,
+    [papers]
+  );
+  const failedPapersCount = useMemo(
+    () => papers.filter((p) => p.analysisStatus === 'failed').length,
     [papers]
   );
   const completedPapersCount = useMemo(
@@ -776,9 +785,12 @@ export function AdminConsolePage({
     [papers, kstCtx.currentMonthKey]
   );
 
-  const handleYouthManualCollect = async () => {
-    if (!authUser || runningYouthSync || researchSyncStatus?.lastSyncStatus === 'syncing') return;
-    setRunningYouthSync(true);
+  const isYouthSyncActive =
+    runningYouthLookback !== null || isSyncActivelyRunning(researchSyncStatus);
+
+  const handleYouthManualCollect = async (lookbackMonths: 3 | 12) => {
+    if (!authUser || isYouthSyncActive) return;
+    setRunningYouthLookback(lookbackMonths);
     try {
       const res = await collectAndAnalyzePapers({
         triggerType: 'manual',
@@ -787,21 +799,22 @@ export function AdminConsolePage({
         existingPapers: papers,
         autoEnabled: researchSyncStatus?.autoEnabled ?? true,
         currentStatus: researchSyncStatus,
-        perCategoryLimit: 3,
+        lookbackMonths,
+        perCategoryLimit: lookbackMonths === 3 ? 4 : 3,
         generateReportToo: true,
       });
       showToast(res.ok ? 'ok' : 'err', res.message);
     } finally {
-      setRunningYouthSync(false);
+      setRunningYouthLookback(null);
     }
   };
 
   const handleRetryFailedAnalysis = async () => {
-    if (!authUser || retryingFailed || failedPapers.length === 0) return;
+    if (!authUser || retryingFailed || pendingOrFailedPapers.length === 0) return;
     setRetryingFailed(true);
     try {
       const res = await retryFailedPapers({
-        failedPapers,
+        failedPapers: pendingOrFailedPapers,
         authUser,
         actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
       });
@@ -1454,7 +1467,7 @@ export function AdminConsolePage({
                     <span className="text-stone-300" aria-hidden="true">
                       ·
                     </span>
-                    {syncingKciMode !== null || researchSyncStatus?.lastSyncStatus === 'syncing' ? (
+                    {syncingKciMode !== null || isSyncActivelyRunning(researchSyncStatus) ? (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#002968]">
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                         동기화 진행 중
@@ -1510,7 +1523,7 @@ export function AdminConsolePage({
                 <button
                   type="button"
                   disabled={
-                    syncingKciMode !== null || researchSyncStatus?.lastSyncStatus === 'syncing'
+                    syncingKciMode !== null || isSyncActivelyRunning(researchSyncStatus)
                   }
                   onClick={() => handleAdminResearchSync('initial_1y')}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
@@ -1523,7 +1536,7 @@ export function AdminConsolePage({
                 <button
                   type="button"
                   disabled={
-                    syncingKciMode !== null || researchSyncStatus?.lastSyncStatus === 'syncing'
+                    syncingKciMode !== null || isSyncActivelyRunning(researchSyncStatus)
                   }
                   onClick={() => handleAdminResearchSync('biweekly')}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
@@ -1949,25 +1962,36 @@ export function AdminConsolePage({
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={handleYouthManualCollect}
-                  disabled={runningYouthSync || researchSyncStatus?.lastSyncStatus === 'syncing'}
+                  onClick={() => handleYouthManualCollect(3)}
+                  disabled={isYouthSyncActive}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <RefreshCw
-                    className={`w-3.5 h-3.5 ${runningYouthSync ? 'animate-spin' : ''}`}
+                    className={`w-3.5 h-3.5 ${runningYouthLookback === 3 || isYouthSyncActive ? 'animate-spin' : ''}`}
                   />
-                  {runningYouthSync ? '수집 · 분석 실행 중...' : '수동 업데이트 실행'}
+                  {runningYouthLookback === 3 ? '3개월 수집 중...' : '최근 3개월 업데이트'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleYouthManualCollect(12)}
+                  disabled={isYouthSyncActive}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-60 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${runningYouthLookback === 12 ? 'animate-spin' : ''}`}
+                  />
+                  {runningYouthLookback === 12 ? '12개월 수집 중...' : '최근 12개월 전체 수집'}
                 </button>
                 <button
                   type="button"
                   onClick={handleRetryFailedAnalysis}
-                  disabled={retryingFailed || failedPapers.length === 0}
+                  disabled={retryingFailed || pendingOrFailedPapers.length === 0 || isYouthSyncActive}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-50 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
                   {retryingFailed
-                    ? '재분석 중...'
-                    : `실패 논문 재분석 (${failedPapers.length}건)`}
+                    ? 'AI 분석 실행 중...'
+                    : `대기·실패 논문 AI 분석 (${pendingOrFailedPapers.length}건)`}
                 </button>
                 <button
                   type="button"
@@ -1999,12 +2023,16 @@ export function AdminConsolePage({
                 </p>
               </div>
               <div className="rounded-lg bg-white border border-stone-200 p-3.5">
-                <p className="text-[11px] text-stone-500">AI 분석 완료 / 실패</p>
-                <p className="text-lg font-bold tabular-nums mt-0.5">
+                <p className="text-[11px] text-stone-500">AI 분석 완료 / 대기 · 실패</p>
+                <p className="text-base font-bold tabular-nums mt-0.5">
                   <span className="text-emerald-700">{completedPapersCount} 완료</span>
-                  <span className="text-stone-300 mx-1.5">/</span>
-                  <span className={failedPapers.length > 0 ? 'text-red-700' : 'text-stone-500'}>
-                    {failedPapers.length} 실패
+                  <span className="text-stone-300 mx-1">/</span>
+                  <span className={pendingPapersCount > 0 ? 'text-amber-700' : 'text-stone-500'}>
+                    {pendingPapersCount} 대기
+                  </span>
+                  <span className="text-stone-300 mx-1">/</span>
+                  <span className={failedPapersCount > 0 ? 'text-red-700' : 'text-stone-500'}>
+                    {failedPapersCount} 실패
                   </span>
                 </p>
               </div>
@@ -2080,6 +2108,13 @@ export function AdminConsolePage({
                         <td className="py-3 px-3 whitespace-nowrap">
                           {p.analysisStatus === 'completed' ? (
                             <span className="text-emerald-700 font-semibold">완료</span>
+                          ) : p.analysisStatus === 'pending' ? (
+                            <span
+                              className="text-amber-700 font-semibold"
+                              title={p.analysisError || 'AI 요약 대기 중'}
+                            >
+                              대기
+                            </span>
                           ) : (
                             <span
                               className="text-red-700 font-semibold"
