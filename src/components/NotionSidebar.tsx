@@ -10,6 +10,7 @@ import {
   LogOut,
   MessageCircle,
   ShieldCheck,
+  Sparkles,
   Users,
   X,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: '홈 · 원우회 소개', icon: Home },
   { id: 'activities', label: '원우회 활동', icon: CalendarDays },
+  { id: 'youthTrends', label: '청소년지도 연구동향', icon: Sparkles },
   { id: 'board', label: '회원 전용 게시판', icon: FileText, memberOnly: true },
   { id: 'trends', label: '연구 동향 아카이브', icon: BookOpen, memberOnly: true },
   { id: 'kakao', label: '카카오톡 라운지', icon: MessageCircle, memberOnly: true },

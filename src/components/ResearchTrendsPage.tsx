@@ -12,29 +12,43 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import {
+  AlertCircle,
   Bookmark,
+  Calendar,
   Check,
+  CheckCircle2,
+  Clock,
   Edit3,
   ExternalLink,
   Lightbulb,
   MessageSquare,
   Pin,
   Plus,
+  RefreshCw,
   Search,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
+  getGoogleScholarSearchUrl,
+  RESEARCH_SYNC_INTERVAL_DAYS,
+  runResearchSync,
+  toggleResearchAutoSync,
+} from '../lib/researchSync';
+import {
   formatAdmissionTerm,
   LIMITS,
   PageTab,
   ResearchComment,
+  ResearchSyncStatus,
   ResearchTrend,
   TrendCategory,
 } from '../types/community';
 import {
+  formatKoreanDate,
   formatKoreanDateTime,
   MemberAccessGate,
   NotionCallout,
@@ -52,9 +66,11 @@ const TREND_CATEGORIES: ('전체' | TrendCategory)[] = [
 ];
 
 export function ResearchTrendsPage({
+  researchSyncStatus = null,
   onOpenApplicationModal,
   onNavigate,
 }: {
+  researchSyncStatus?: ResearchSyncStatus | null;
   onOpenApplicationModal: () => void;
   onNavigate: (tab: PageTab) => void;
 }) {
@@ -65,6 +81,13 @@ export function ResearchTrendsPage({
   const [category, setCategory] = useState<'전체' | TrendCategory>('전체');
   const [onlyBookmarked, setOnlyBookmarked] = useState(false);
   const [search, setSearch] = useState('');
+
+  // Admin KCI AI Sync UI State
+  const [syncingMode, setSyncingMode] = useState<'initial_1y' | 'biweekly' | null>(null);
+  const [togglingAuto, setTogglingAuto] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(
+    null
+  );
 
   // Create / Edit Modal
   const [editorOpen, setEditorOpen] = useState(false);
@@ -375,6 +398,97 @@ export function ResearchTrendsPage({
     }
   };
 
+  const latestArchiveTimestamp = useMemo(() => {
+    if (researchSyncStatus?.lastSyncedAt) return researchSyncStatus.lastSyncedAt;
+    let latest: ResearchTrend['updatedAt'] | null = null;
+    let maxMs = 0;
+    for (const item of trends) {
+      const ms = item.updatedAt?.toMillis?.() ?? item.createdAt?.toMillis?.() ?? 0;
+      if (ms > maxMs) {
+        maxMs = ms;
+        latest = item.updatedAt || item.createdAt;
+      }
+    }
+    return latest;
+  }, [researchSyncStatus, trends]);
+
+  const isSyncCurrentlyRunning =
+    syncingMode !== null || researchSyncStatus?.lastSyncStatus === 'syncing';
+  const autoEnabled = researchSyncStatus?.autoEnabled !== false;
+
+  const syncStatusMeta = useMemo(() => {
+    if (isSyncCurrentlyRunning) {
+      return {
+        label: '동기화 진행 중',
+        toneClass: 'text-[#002968]',
+        icon: <RefreshCw className="w-4 h-4 text-[#002968] animate-spin" />,
+      };
+    }
+    if (researchSyncStatus?.lastSyncStatus === 'success') {
+      return {
+        label: '정상 동기화 완료',
+        toneClass: 'text-emerald-800',
+        icon: <CheckCircle2 className="w-4 h-4 text-emerald-700" />,
+      };
+    }
+    if (researchSyncStatus?.lastSyncStatus === 'error') {
+      return {
+        label: '동기화 오류 확인 필요',
+        toneClass: 'text-red-700',
+        icon: <AlertCircle className="w-4 h-4 text-red-600" />,
+      };
+    }
+    return {
+      label: '초기 구글 학술검색 연동 대기',
+      toneClass: 'text-amber-800',
+      icon: <Clock className="w-4 h-4 text-amber-700" />,
+    };
+  }, [isSyncCurrentlyRunning, researchSyncStatus?.lastSyncStatus]);
+
+  const handleManualResearchSync = async (mode: 'initial_1y' | 'biweekly') => {
+    if (!authUser || isSyncCurrentlyRunning) return;
+    setSyncFeedback(null);
+    setSyncingMode(mode);
+    try {
+      const result = await runResearchSync({
+        mode,
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+        existingTrends: trends,
+        autoEnabled,
+        currentStatus: researchSyncStatus,
+      });
+      setSyncFeedback({
+        type: result.ok ? 'ok' : 'err',
+        text: result.message,
+      });
+    } finally {
+      setSyncingMode(null);
+    }
+  };
+
+  const handleToggleAutoSync = async () => {
+    if (!authUser || togglingAuto) return;
+    setTogglingAuto(true);
+    setSyncFeedback(null);
+    try {
+      await toggleResearchAutoSync({
+        enabled: !autoEnabled,
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+        currentStatus: researchSyncStatus,
+      });
+      setSyncFeedback({
+        type: 'ok',
+        text: !autoEnabled
+          ? `구글 학술검색 ${RESEARCH_SYNC_INTERVAL_DAYS}일 주기 자동 업데이트가 켜졌습니다.`
+          : '구글 학술검색 자동 업데이트가 일시 중지되었습니다.',
+      });
+    } finally {
+      setTogglingAuto(false);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-5 sm:px-10 py-8 sm:py-10">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6 border-b border-stone-200 mb-6">
@@ -384,8 +498,33 @@ export function ResearchTrendsPage({
             청소년지도학 연구 동향 공유
           </h1>
           <p className="text-sm text-stone-600 mt-1.5">
-            최신 정책 보고서, 학술논문 리뷰, 연구방법론 및 학회 소식을 원우들과 함께 축적합니다.
+            구글 학술검색(Google Scholar) 최신 논문 AI 자동 연동과 원우들의 연구 리뷰를 함께 축적합니다.
           </p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-stone-600">
+            <span className="inline-flex items-center gap-1.5 font-medium text-stone-800">
+              <Clock className="w-3.5 h-3.5 text-[#002968]" />
+              최근 업데이트 일자:{' '}
+              <span className="font-mono tabular-nums">
+                {latestArchiveTimestamp ? formatKoreanDateTime(latestArchiveTimestamp) : '대기 중'}
+              </span>
+            </span>
+            <span className="text-stone-300" aria-hidden="true">
+              ·
+            </span>
+            <span>
+              구글 학술검색 연동 ({autoEnabled ? `${RESEARCH_SYNC_INTERVAL_DAYS}일마다 자동 업데이트` : '자동 업데이트 일시 중지'})
+            </span>
+            {autoEnabled && researchSyncStatus?.nextSyncAt && (
+              <>
+                <span className="text-stone-300" aria-hidden="true">
+                  ·
+                </span>
+                <span className="font-mono tabular-nums text-stone-500">
+                  다음 예정: {formatKoreanDate(researchSyncStatus.nextSyncAt)}
+                </span>
+              </>
+            )}
+          </div>
         </div>
         <button
           type="button"
@@ -396,6 +535,121 @@ export function ResearchTrendsPage({
           연구 동향 공유하기
         </button>
       </div>
+
+      {/* Admin-only Last Auto-Sync Status & Control Panel */}
+      {isAdmin && (
+        <section
+          aria-label="관리자 구글 학술검색 AI 자동 동기화 상태"
+          className="mb-6 rounded-xl border border-[#D5DFEE] bg-[#F4F7FB] p-4 sm:p-5 space-y-4"
+        >
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-white border border-[#D5DFEE] flex items-center justify-center shrink-0 text-[#002968]">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm font-bold text-stone-900">
+                    관리자 구글 학술검색 AI 자동 동기화 상태
+                  </h2>
+                  <span className="text-stone-300" aria-hidden="true">
+                    ·
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 text-xs font-semibold ${syncStatusMeta.toneClass}`}
+                  >
+                    {syncStatusMeta.icon}
+                    {syncStatusMeta.label}
+                  </span>
+                </div>
+                <p className="text-xs text-stone-600 mt-0.5">
+                  최초 연동 시 최근 1년간 발표된 구글 학술검색 청소년지도학 논문을 수집하고, 이후{' '}
+                  {RESEARCH_SYNC_INTERVAL_DAYS}일(2주) 주기로 신규 논문을 자동 업데이트합니다.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={isSyncCurrentlyRunning}
+                onClick={() => handleManualResearchSync('initial_1y')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${syncingMode === 'initial_1y' ? 'animate-spin' : ''}`}
+                />
+                {syncingMode === 'initial_1y' ? '최근 1년 수집 중...' : '최근 1년 논문 동기화'}
+              </button>
+              <button
+                type="button"
+                disabled={isSyncCurrentlyRunning}
+                onClick={() => handleManualResearchSync('biweekly')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-60 rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Calendar className="w-3.5 h-3.5 text-[#002968]" />
+                {syncingMode === 'biweekly' ? '최신 논문 확인 중...' : '2주 최신 논문 업데이트'}
+              </button>
+              <button
+                type="button"
+                disabled={togglingAuto}
+                onClick={handleToggleAutoSync}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  autoEnabled
+                    ? 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-50'
+                    : 'bg-white text-stone-600 border-stone-300 hover:bg-stone-50'
+                }`}
+              >
+                {autoEnabled ? '2주 자동 동기화: 켜짐' : '2주 자동 동기화: 꺼짐'}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-lg border border-[#D5DFEE] bg-white px-3.5 py-2.5">
+              <p className="text-[11px] font-medium text-stone-500">마지막 자동 동기화 일시</p>
+              <p className="text-xs sm:text-sm font-semibold text-stone-900 font-mono tabular-nums mt-0.5">
+                {researchSyncStatus?.lastSyncedAt
+                  ? formatKoreanDateTime(researchSyncStatus.lastSyncedAt)
+                  : '기록 없음 (초기 동기화 필요)'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-[#D5DFEE] bg-white px-3.5 py-2.5">
+              <p className="text-[11px] font-medium text-stone-500">다음 자동 업데이트 예정</p>
+              <p className="text-xs sm:text-sm font-semibold text-stone-900 font-mono tabular-nums mt-0.5">
+                {!autoEnabled
+                  ? '자동 동기화 일시 중지됨'
+                  : researchSyncStatus?.nextSyncAt
+                    ? `${formatKoreanDate(researchSyncStatus.nextSyncAt)} (2주 주기)`
+                    : '최초 동기화 완료 후 자동 예약'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-[#D5DFEE] bg-white px-3.5 py-2.5">
+              <p className="text-[11px] font-medium text-stone-500">최근 반영 결과 · 아카이브</p>
+              <p className="text-xs sm:text-sm font-semibold text-stone-900 tabular-nums mt-0.5">
+                {researchSyncStatus
+                  ? `신규 ${researchSyncStatus.lastSyncCount}편 반영 · 총 ${trends.length}편`
+                  : `총 ${trends.length}편 등록됨`}
+              </p>
+            </div>
+          </div>
+
+          {(syncFeedback || researchSyncStatus?.lastSyncMessage) && (
+            <div
+              className={`rounded-lg border px-3.5 py-2 text-xs leading-relaxed ${
+                syncFeedback?.type === 'err' || researchSyncStatus?.lastSyncStatus === 'error'
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-white border-[#D5DFEE] text-stone-700'
+              }`}
+            >
+              <span className="font-semibold mr-1.5">
+                {researchSyncStatus?.windowLabel ? `[${researchSyncStatus.windowLabel}]` : '[동기화 로그]'}
+              </span>
+              {syncFeedback?.text || researchSyncStatus?.lastSyncMessage}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Filter & Search Bar */}
       <div className="flex flex-col gap-3 mb-6">
@@ -786,19 +1040,34 @@ export function ResearchTrendsPage({
               </span>
             </p>
 
-            {selectedTrend.externalUrl && (
-              <div className="mb-6">
-                <a
-                  href={selectedTrend.externalUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-[#002968] bg-[#F4F7FB] border border-[#D5DFEE] hover:bg-[#EAEFF7] rounded-md transition-colors"
-                >
-                  원문 또는 학술 자료 페이지 열기
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              </div>
-            )}
+            <div className="mb-6 flex flex-wrap items-center gap-2">
+              {selectedTrend.externalUrl &&
+                !selectedTrend.externalUrl.includes('scholar.google.') && (
+                  <a
+                    href={selectedTrend.externalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-[#002968] bg-[#F4F7FB] border border-[#D5DFEE] hover:bg-[#EAEFF7] rounded-md transition-colors whitespace-nowrap shrink-0"
+                  >
+                    원문 또는 학술 자료 페이지 열기
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              <a
+                href={
+                  selectedTrend.externalUrl?.includes('scholar.google.')
+                    ? selectedTrend.externalUrl
+                    : getGoogleScholarSearchUrl(selectedTrend.title)
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 rounded-md transition-colors whitespace-nowrap shrink-0"
+              >
+                <Search className="w-3.5 h-3.5 text-[#002968]" />
+                구글 학술검색에서 보기
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
 
             {selectedTrend.keyTakeaway && (
               <div className="mb-6">

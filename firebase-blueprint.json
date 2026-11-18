@@ -419,6 +419,209 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["trendId", "title", "createdAt"]
+    },
+    "ResearchSyncStatus": {
+      "title": "ResearchSyncStatus",
+      "description": "Metadata and schedule status for automated Google Scholar research trend syncing.",
+      "type": "object",
+      "properties": {
+        "autoEnabled": { "type": "boolean" },
+        "intervalDays": { "type": "integer" },
+        "lastSyncedAt": { "type": "string", "format": "date-time" },
+        "nextSyncAt": { "type": "string", "format": "date-time" },
+        "lastSyncStatus": {
+          "type": "string",
+          "enum": ["idle", "syncing", "success", "error"]
+        },
+        "lastSyncMode": {
+          "type": "string",
+          "enum": ["initial_1y", "biweekly", "monthly", "manual"]
+        },
+        "lastSyncCount": { "type": "integer" },
+        "lastSyncMessage": { "type": "string", "minLength": 0, "maxLength": 400 },
+        "windowLabel": { "type": "string", "minLength": 0, "maxLength": 80 },
+        "scheduleCron": { "type": "string", "minLength": 0, "maxLength": 40 },
+        "timezone": { "type": "string", "minLength": 0, "maxLength": 40 },
+        "koreanCoverageNotice": { "type": "string", "minLength": 0, "maxLength": 400 },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "autoEnabled",
+        "intervalDays",
+        "lastSyncStatus",
+        "lastSyncCount",
+        "updatedByUid",
+        "updatedByName",
+        "updatedAt"
+      ]
+    },
+    "Paper": {
+      "title": "Paper",
+      "description": "Collected academic paper from OpenAlex and Crossref with Gemini AI youth guidance classification and analysis.",
+      "type": "object",
+      "properties": {
+        "paperId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 300 },
+        "authors": { "type": "array" },
+        "journalName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "publicationDate": { "type": "string", "minLength": 4, "maxLength": 20 },
+        "language": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "region": { "type": "string", "enum": ["domestic", "international"] },
+        "abstract": { "type": "string", "minLength": 0, "maxLength": 8000 },
+        "keywords": { "type": "array" },
+        "doi": { "type": "string", "minLength": 0, "maxLength": 200 },
+        "openAlexId": { "type": "string", "minLength": 0, "maxLength": 160 },
+        "crossrefId": { "type": "string", "minLength": 0, "maxLength": 200 },
+        "paperUrl": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "source": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "openAccess": { "type": "boolean" },
+        "citedByCount": { "type": "integer" },
+        "mainCategory": {
+          "type": "string",
+          "enum": [
+            "청소년지도 및 청소년 활동",
+            "청소년 진로 및 리더십",
+            "청소년 참여 및 사회적 성장",
+            "AI 및 디지털 시대의 청소년",
+            "청소년 교육 및 평생학습",
+            "청소년 문제 및 사회 변화"
+          ]
+        },
+        "relatedCategories": { "type": "array" },
+        "researchPurpose": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "researchBackground": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "researchQuestion": { "type": "string", "minLength": 0, "maxLength": 1000 },
+        "researchMethod": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "researchTarget": { "type": "string", "minLength": 0, "maxLength": 1000 },
+        "researchFindings": { "type": "string", "minLength": 0, "maxLength": 2500 },
+        "researchLimitations": { "type": "string", "minLength": 0, "maxLength": 1500 },
+        "practicalImplications": { "type": "string", "minLength": 0, "maxLength": 2000 },
+        "policyImplications": { "type": "string", "minLength": 0, "maxLength": 2000 },
+        "easySummary": { "type": "string", "minLength": 0, "maxLength": 2500 },
+        "analysisBasis": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "analysisStatus": { "type": "string", "enum": ["completed", "failed", "pending"] },
+        "analysisError": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "isPublished": { "type": "boolean" },
+        "aiAnalysisDate": { "type": "string", "minLength": 0, "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "paperId",
+        "title",
+        "authors",
+        "journalName",
+        "publicationDate",
+        "language",
+        "region",
+        "abstract",
+        "keywords",
+        "source",
+        "openAccess",
+        "mainCategory",
+        "relatedCategories",
+        "analysisBasis",
+        "analysisStatus",
+        "isPublished",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MonthlyTrendReport": {
+      "title": "MonthlyTrendReport",
+      "description": "Monthly AI-generated youth guidance research trend synthesis report.",
+      "type": "object",
+      "properties": {
+        "reportId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "monthLabel": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "periodRange": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "totalPapersCount": { "type": "integer" },
+        "newPapersCount": { "type": "integer" },
+        "domesticCount": { "type": "integer" },
+        "internationalCount": { "type": "integer" },
+        "categoryFlows": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "notablePapers": { "type": "string", "minLength": 1, "maxLength": 3000 },
+        "keyThemes": { "type": "string", "minLength": 1, "maxLength": 2500 },
+        "commonFindings": { "type": "string", "minLength": 1, "maxLength": 2500 },
+        "researchGaps": { "type": "string", "minLength": 1, "maxLength": 2500 },
+        "fieldImplications": { "type": "string", "minLength": 1, "maxLength": 2500 },
+        "isPublished": { "type": "boolean" },
+        "createdByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "reportId",
+        "monthLabel",
+        "periodRange",
+        "totalPapersCount",
+        "newPapersCount",
+        "domesticCount",
+        "internationalCount",
+        "categoryFlows",
+        "notablePapers",
+        "keyThemes",
+        "commonFindings",
+        "researchGaps",
+        "fieldImplications",
+        "isPublished",
+        "createdByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ResearchSyncLog": {
+      "title": "ResearchSyncLog",
+      "description": "Execution, error, and API/AI usage audit log for automated paper collection and analysis.",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "triggerType": { "type": "string", "enum": ["manual", "scheduled_monthly", "retry_failed"] },
+        "status": { "type": "string", "enum": ["success", "partial", "error"] },
+        "collectedCount": { "type": "integer" },
+        "newPapersCount": { "type": "integer" },
+        "domesticCount": { "type": "integer" },
+        "internationalCount": { "type": "integer" },
+        "analyzedSuccessCount": { "type": "integer" },
+        "analyzedFailedCount": { "type": "integer" },
+        "openAlexCalls": { "type": "integer" },
+        "crossrefCalls": { "type": "integer" },
+        "geminiCalls": { "type": "integer" },
+        "estimatedTokens": { "type": "integer" },
+        "collectionErrors": { "type": "array" },
+        "analysisErrors": { "type": "array" },
+        "koreanCoverageNotice": { "type": "string", "minLength": 0, "maxLength": 400 },
+        "executedByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "executedByName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "logId",
+        "triggerType",
+        "status",
+        "collectedCount",
+        "newPapersCount",
+        "domesticCount",
+        "internationalCount",
+        "analyzedSuccessCount",
+        "analyzedFailedCount",
+        "openAlexCalls",
+        "crossrefCalls",
+        "geminiCalls",
+        "estimatedTokens",
+        "collectionErrors",
+        "analysisErrors",
+        "executedByUid",
+        "executedByName",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -445,6 +648,22 @@
     "/settings/communityLinks": {
       "schema": { "$ref": "#/entities/CommunityLinks" },
       "description": "Member-only KakaoTalk Open Chat links and passcode."
+    },
+    "/settings/researchSync": {
+      "schema": { "$ref": "#/entities/ResearchSyncStatus" },
+      "description": "Automated research sync status and schedule metadata."
+    },
+    "/papers/{paperId}": {
+      "schema": { "$ref": "#/entities/Paper" },
+      "description": "Youth guidance papers collected via OpenAlex & Crossref with Gemini AI analysis."
+    },
+    "/monthlyReports/{reportId}": {
+      "schema": { "$ref": "#/entities/MonthlyTrendReport" },
+      "description": "Monthly AI-generated youth guidance research trend synthesis reports."
+    },
+    "/syncLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ResearchSyncLog" },
+      "description": "Admin-only audit log of paper collection, AI analysis errors, and API usage."
     },
     "/activities/{activityId}": {
       "schema": { "$ref": "#/entities/CouncilActivity" },

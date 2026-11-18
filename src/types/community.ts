@@ -20,6 +20,7 @@ export type PageTab =
   | 'activities'
   | 'board'
   | 'trends'
+  | 'youthTrends'
   | 'kakao'
   | 'directory'
   | 'admin';
@@ -221,3 +222,117 @@ export interface TrendBookmark {
   title: string;
   createdAt: Timestamp;
 }
+
+export type ResearchSyncStatusType = 'idle' | 'syncing' | 'success' | 'error';
+export type ResearchSyncMode = 'initial_1y' | 'biweekly' | 'monthly' | 'manual';
+
+export interface ResearchSyncStatus {
+  autoEnabled: boolean;
+  intervalDays: number;
+  lastSyncedAt?: Timestamp;
+  nextSyncAt?: Timestamp;
+  lastSyncStatus: ResearchSyncStatusType;
+  lastSyncMode?: ResearchSyncMode;
+  lastSyncCount: number;
+  lastSyncMessage?: string;
+  windowLabel?: string;
+  scheduleCron?: string;
+  timezone?: string;
+  koreanCoverageNotice?: string;
+  updatedByUid: string;
+  updatedByName: string;
+  updatedAt: Timestamp;
+}
+
+export const YOUTH_RESEARCH_CATEGORIES = [
+  '청소년지도 및 청소년 활동',
+  '청소년 진로 및 리더십',
+  '청소년 참여 및 사회적 성장',
+  'AI 및 디지털 시대의 청소년',
+  '청소년 교육 및 평생학습',
+  '청소년 문제 및 사회 변화',
+] as const;
+
+export type YouthResearchCategory = (typeof YOUTH_RESEARCH_CATEGORIES)[number];
+
+export interface PaperRecord {
+  paperId: string;
+  title: string;
+  authors: string[];
+  journalName: string;
+  publicationDate: string;
+  language: string;
+  region: 'domestic' | 'international';
+  abstract: string;
+  keywords: string[];
+  doi?: string;
+  openAlexId?: string;
+  crossrefId?: string;
+  paperUrl?: string;
+  source: string;
+  openAccess: boolean;
+  citedByCount?: number;
+  mainCategory: YouthResearchCategory;
+  relatedCategories: YouthResearchCategory[];
+  researchPurpose?: string;
+  researchBackground?: string;
+  researchQuestion?: string;
+  researchMethod?: string;
+  researchTarget?: string;
+  researchFindings?: string;
+  researchLimitations?: string;
+  practicalImplications?: string;
+  policyImplications?: string;
+  easySummary?: string;
+  analysisBasis: string;
+  analysisStatus: 'completed' | 'failed' | 'pending';
+  analysisError?: string;
+  isPublished: boolean;
+  aiAnalysisDate?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface MonthlyTrendReport {
+  reportId: string;
+  monthLabel: string;
+  periodRange: string;
+  totalPapersCount: number;
+  newPapersCount: number;
+  domesticCount: number;
+  internationalCount: number;
+  categoryFlows: string;
+  notablePapers: string;
+  keyThemes: string;
+  commonFindings: string;
+  researchGaps: string;
+  fieldImplications: string;
+  isPublished: boolean;
+  createdByUid: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface ResearchSyncLog {
+  logId: string;
+  triggerType: 'manual' | 'scheduled_monthly' | 'retry_failed';
+  status: 'success' | 'partial' | 'error';
+  collectedCount: number;
+  newPapersCount: number;
+  domesticCount: number;
+  internationalCount: number;
+  analyzedSuccessCount: number;
+  analyzedFailedCount: number;
+  openAlexCalls: number;
+  crossrefCalls: number;
+  geminiCalls: number;
+  estimatedTokens: number;
+  collectionErrors: string[];
+  analysisErrors: string[];
+  koreanCoverageNotice?: string;
+  executedByUid: string;
+  executedByName: string;
+  createdAt: Timestamp;
+}
+
+

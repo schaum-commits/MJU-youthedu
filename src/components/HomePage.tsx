@@ -294,6 +294,22 @@ export function HomePage({
                 실시간 대화를 위한 원우회 공식 카카오톡 오픈채팅 링크와 참여코드를 안내합니다.
               </p>
             </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('youthTrends')}
+              className="group text-left rounded-lg border border-[#D5DFEE] bg-[#F4F7FB] hover:bg-[#EAF0F8] p-4 transition-colors sm:col-span-2 cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="inline-flex items-center gap-2 text-sm font-semibold text-[#002968]">
+                  <Sparkles className="w-4 h-4 text-[#002968]" />
+                  청소년지도 최신 연구동향 (OpenAlex · Crossref · AI 분석)
+                </span>
+                <ArrowRight className="w-4 h-4 text-[#002968] group-hover:translate-x-0.5 transition-transform" />
+              </div>
+              <p className="text-xs text-stone-700 leading-relaxed">
+                최근 12개월 국내외 학술논문 자동 수집, 6대 분야 분류 및 초록 기반 Gemini AI 연구 요약·월간 동향 보고서를 누구나 열람할 수 있습니다.
+              </p>
+            </button>
           </div>
         </section>
 

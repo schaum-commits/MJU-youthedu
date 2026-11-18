@@ -231,6 +231,166 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidResearchSync(data) {
+      return data.keys().hasAll([
+          'autoEnabled', 'intervalDays', 'lastSyncStatus', 'lastSyncCount',
+          'updatedByUid', 'updatedByName', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'autoEnabled', 'intervalDays', 'lastSyncedAt', 'nextSyncAt',
+          'lastSyncStatus', 'lastSyncMode', 'lastSyncCount', 'lastSyncMessage',
+          'windowLabel', 'scheduleCron', 'timezone', 'koreanCoverageNotice',
+          'updatedByUid', 'updatedByName', 'updatedAt'
+        ]) &&
+        data.autoEnabled is bool &&
+        data.intervalDays is int && data.intervalDays >= 1 && data.intervalDays <= 90 &&
+        (!('lastSyncedAt' in data) || data.lastSyncedAt is timestamp) &&
+        (!('nextSyncAt' in data) || data.nextSyncAt is timestamp) &&
+        data.lastSyncStatus in ['idle', 'syncing', 'success', 'error'] &&
+        (!('lastSyncMode' in data) || data.lastSyncMode in ['initial_1y', 'biweekly', 'monthly', 'manual']) &&
+        data.lastSyncCount is int && data.lastSyncCount >= 0 && data.lastSyncCount <= 500 &&
+        (!('lastSyncMessage' in data) || (data.lastSyncMessage is string && data.lastSyncMessage.size() <= 400)) &&
+        (!('windowLabel' in data) || (data.windowLabel is string && data.windowLabel.size() <= 80)) &&
+        (!('scheduleCron' in data) || (data.scheduleCron is string && data.scheduleCron.size() <= 40)) &&
+        (!('timezone' in data) || (data.timezone is string && data.timezone.size() <= 40)) &&
+        (!('koreanCoverageNotice' in data) || (data.koreanCoverageNotice is string && data.koreanCoverageNotice.size() <= 400)) &&
+        isValidId(data.updatedByUid) &&
+        data.updatedByName is string && data.updatedByName.size() >= 1 && data.updatedByName.size() <= 60 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStringArray(arr, maxLen) {
+      return arr is list && arr.size() <= maxLen && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= 300));
+    }
+
+    function isValidPaper(data) {
+      return data.keys().hasAll([
+          'paperId', 'title', 'authors', 'journalName', 'publicationDate', 'language',
+          'region', 'abstract', 'keywords', 'source', 'openAccess', 'mainCategory',
+          'relatedCategories', 'analysisBasis', 'analysisStatus', 'isPublished',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'paperId', 'title', 'authors', 'journalName', 'publicationDate', 'language',
+          'region', 'abstract', 'keywords', 'doi', 'openAlexId', 'crossrefId',
+          'paperUrl', 'source', 'openAccess', 'citedByCount', 'mainCategory',
+          'relatedCategories', 'researchPurpose', 'researchBackground', 'researchQuestion',
+          'researchMethod', 'researchTarget', 'researchFindings', 'researchLimitations',
+          'practicalImplications', 'policyImplications', 'easySummary', 'analysisBasis',
+          'analysisStatus', 'analysisError', 'isPublished', 'aiAnalysisDate',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.paperId) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 300 &&
+        isValidStringArray(data.authors, 30) &&
+        data.journalName is string && data.journalName.size() >= 1 && data.journalName.size() <= 200 &&
+        data.publicationDate is string && data.publicationDate.size() >= 4 && data.publicationDate.size() <= 20 &&
+        data.language is string && data.language.size() >= 1 && data.language.size() <= 20 &&
+        data.region in ['domestic', 'international'] &&
+        data.abstract is string && data.abstract.size() <= 8000 &&
+        isValidStringArray(data.keywords, 20) &&
+        (!('doi' in data) || (data.doi is string && data.doi.size() <= 200)) &&
+        (!('openAlexId' in data) || (data.openAlexId is string && data.openAlexId.size() <= 160)) &&
+        (!('crossrefId' in data) || (data.crossrefId is string && data.crossrefId.size() <= 200)) &&
+        (!('paperUrl' in data) || (data.paperUrl is string && data.paperUrl.size() <= 500)) &&
+        data.source is string && data.source.size() >= 1 && data.source.size() <= 60 &&
+        data.openAccess is bool &&
+        (!('citedByCount' in data) || (data.citedByCount is int && data.citedByCount >= 0 && data.citedByCount <= 1000000)) &&
+        data.mainCategory in [
+          '청소년지도 및 청소년 활동',
+          '청소년 진로 및 리더십',
+          '청소년 참여 및 사회적 성장',
+          'AI 및 디지털 시대의 청소년',
+          '청소년 교육 및 평생학습',
+          '청소년 문제 및 사회 변화'
+        ] &&
+        isValidStringArray(data.relatedCategories, 6) &&
+        (!('researchPurpose' in data) || (data.researchPurpose is string && data.researchPurpose.size() <= 1500)) &&
+        (!('researchBackground' in data) || (data.researchBackground is string && data.researchBackground.size() <= 1500)) &&
+        (!('researchQuestion' in data) || (data.researchQuestion is string && data.researchQuestion.size() <= 1000)) &&
+        (!('researchMethod' in data) || (data.researchMethod is string && data.researchMethod.size() <= 1500)) &&
+        (!('researchTarget' in data) || (data.researchTarget is string && data.researchTarget.size() <= 1000)) &&
+        (!('researchFindings' in data) || (data.researchFindings is string && data.researchFindings.size() <= 2500)) &&
+        (!('researchLimitations' in data) || (data.researchLimitations is string && data.researchLimitations.size() <= 1500)) &&
+        (!('practicalImplications' in data) || (data.practicalImplications is string && data.practicalImplications.size() <= 2000)) &&
+        (!('policyImplications' in data) || (data.policyImplications is string && data.policyImplications.size() <= 2000)) &&
+        (!('easySummary' in data) || (data.easySummary is string && data.easySummary.size() <= 2500)) &&
+        data.analysisBasis is string && data.analysisBasis.size() >= 1 && data.analysisBasis.size() <= 100 &&
+        data.analysisStatus in ['completed', 'failed', 'pending'] &&
+        (!('analysisError' in data) || (data.analysisError is string && data.analysisError.size() <= 500)) &&
+        data.isPublished is bool &&
+        (!('aiAnalysisDate' in data) || (data.aiAnalysisDate is string && data.aiAnalysisDate.size() <= 40)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMonthlyReport(data) {
+      return data.keys().hasAll([
+          'reportId', 'monthLabel', 'periodRange', 'totalPapersCount', 'newPapersCount',
+          'domesticCount', 'internationalCount', 'categoryFlows', 'notablePapers',
+          'keyThemes', 'commonFindings', 'researchGaps', 'fieldImplications',
+          'isPublished', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'reportId', 'monthLabel', 'periodRange', 'totalPapersCount', 'newPapersCount',
+          'domesticCount', 'internationalCount', 'categoryFlows', 'notablePapers',
+          'keyThemes', 'commonFindings', 'researchGaps', 'fieldImplications',
+          'isPublished', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.reportId) &&
+        data.monthLabel is string && data.monthLabel.size() >= 1 && data.monthLabel.size() <= 60 &&
+        data.periodRange is string && data.periodRange.size() >= 1 && data.periodRange.size() <= 80 &&
+        data.totalPapersCount is int && data.totalPapersCount >= 0 && data.totalPapersCount <= 100000 &&
+        data.newPapersCount is int && data.newPapersCount >= 0 && data.newPapersCount <= 100000 &&
+        data.domesticCount is int && data.domesticCount >= 0 && data.domesticCount <= 100000 &&
+        data.internationalCount is int && data.internationalCount >= 0 && data.internationalCount <= 100000 &&
+        data.categoryFlows is string && data.categoryFlows.size() >= 1 && data.categoryFlows.size() <= 4000 &&
+        data.notablePapers is string && data.notablePapers.size() >= 1 && data.notablePapers.size() <= 3000 &&
+        data.keyThemes is string && data.keyThemes.size() >= 1 && data.keyThemes.size() <= 2500 &&
+        data.commonFindings is string && data.commonFindings.size() >= 1 && data.commonFindings.size() <= 2500 &&
+        data.researchGaps is string && data.researchGaps.size() >= 1 && data.researchGaps.size() <= 2500 &&
+        data.fieldImplications is string && data.fieldImplications.size() >= 1 && data.fieldImplications.size() <= 2500 &&
+        data.isPublished is bool &&
+        isValidId(data.createdByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSyncLog(data) {
+      return data.keys().hasAll([
+          'logId', 'triggerType', 'status', 'collectedCount', 'newPapersCount',
+          'domesticCount', 'internationalCount', 'analyzedSuccessCount', 'analyzedFailedCount',
+          'openAlexCalls', 'crossrefCalls', 'geminiCalls', 'estimatedTokens',
+          'collectionErrors', 'analysisErrors', 'executedByUid', 'executedByName', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'logId', 'triggerType', 'status', 'collectedCount', 'newPapersCount',
+          'domesticCount', 'internationalCount', 'analyzedSuccessCount', 'analyzedFailedCount',
+          'openAlexCalls', 'crossrefCalls', 'geminiCalls', 'estimatedTokens',
+          'collectionErrors', 'analysisErrors', 'koreanCoverageNotice',
+          'executedByUid', 'executedByName', 'createdAt'
+        ]) &&
+        isValidId(data.logId) &&
+        data.triggerType in ['manual', 'scheduled_monthly', 'retry_failed'] &&
+        data.status in ['success', 'partial', 'error'] &&
+        data.collectedCount is int && data.collectedCount >= 0 && data.collectedCount <= 10000 &&
+        data.newPapersCount is int && data.newPapersCount >= 0 && data.newPapersCount <= 10000 &&
+        data.domesticCount is int && data.domesticCount >= 0 && data.domesticCount <= 10000 &&
+        data.internationalCount is int && data.internationalCount >= 0 && data.internationalCount <= 10000 &&
+        data.analyzedSuccessCount is int && data.analyzedSuccessCount >= 0 && data.analyzedSuccessCount <= 10000 &&
+        data.analyzedFailedCount is int && data.analyzedFailedCount >= 0 && data.analyzedFailedCount <= 10000 &&
+        data.openAlexCalls is int && data.openAlexCalls >= 0 && data.openAlexCalls <= 10000 &&
+        data.crossrefCalls is int && data.crossrefCalls >= 0 && data.crossrefCalls <= 10000 &&
+        data.geminiCalls is int && data.geminiCalls >= 0 && data.geminiCalls <= 10000 &&
+        data.estimatedTokens is int && data.estimatedTokens >= 0 && data.estimatedTokens <= 100000000 &&
+        isValidStringArray(data.collectionErrors, 30) &&
+        isValidStringArray(data.analysisErrors, 30) &&
+        (!('koreanCoverageNotice' in data) || (data.koreanCoverageNotice is string && data.koreanCoverageNotice.size() <= 400)) &&
+        isValidId(data.executedByUid) &&
+        data.executedByName is string && data.executedByName.size() >= 1 && data.executedByName.size() <= 60 &&
+        data.createdAt is timestamp;
+    }
+
     match /test/connection {
       allow get: if true;
       allow write: if false;
@@ -337,6 +497,74 @@ service cloud.firestore {
         isValidCommunityLinks(incoming()) &&
         incoming().updatedAt == request.time;
       allow delete: if false;
+    }
+
+    match /settings/researchSync {
+      allow get: if true;
+      allow create, update: if isAdmin() &&
+        isValidResearchSync(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /papers/{paperId} {
+      allow get: if isValidId(paperId) && ((resource != null && existing().isPublished == true) || isAdmin());
+      allow list: if resource.data.isPublished == true || isAdmin();
+
+      allow create: if isValidId(paperId) &&
+        isAdmin() &&
+        isValidPaper(incoming()) &&
+        incoming().paperId == paperId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(paperId) &&
+        isAdmin() &&
+        isValidPaper(incoming()) &&
+        incoming().paperId == existing().paperId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+
+      allow delete: if isValidId(paperId) && isAdmin();
+    }
+
+    match /monthlyReports/{reportId} {
+      allow get: if isValidId(reportId) && ((resource != null && existing().isPublished == true) || isAdmin());
+      allow list: if resource.data.isPublished == true || isAdmin();
+
+      allow create: if isValidId(reportId) &&
+        isAdmin() &&
+        isValidMonthlyReport(incoming()) &&
+        incoming().reportId == reportId &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(reportId) &&
+        isAdmin() &&
+        isValidMonthlyReport(incoming()) &&
+        incoming().reportId == existing().reportId &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+
+      allow delete: if isValidId(reportId) && isAdmin();
+    }
+
+    match /syncLogs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if isValidId(logId) &&
+        isAdmin() &&
+        isValidSyncLog(incoming()) &&
+        incoming().logId == logId &&
+        incoming().executedByUid == request.auth.uid &&
+        incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isValidId(logId) && isAdmin();
     }
 
     match /activities/{activityId} {

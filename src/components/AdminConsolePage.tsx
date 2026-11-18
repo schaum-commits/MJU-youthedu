@@ -13,11 +13,17 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import {
+  AlertCircle,
   BookOpen,
   CalendarDays,
   Check,
+  CheckCircle2,
+  Clock,
   Database,
   Edit3,
+  Eye,
+  EyeOff,
+  FileBarChart2,
   FileText,
   Image as ImageIcon,
   LogIn,
@@ -25,9 +31,11 @@ import {
   MessageSquare,
   Pin,
   Plus,
+  RefreshCw,
   Search,
   Shield,
   ShieldAlert,
+  Sparkles,
   Trash2,
   UserCheck,
   UserX,
@@ -36,6 +44,18 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import {
+  RESEARCH_SYNC_INTERVAL_DAYS,
+  runResearchSync,
+  toggleResearchAutoSync,
+} from '../lib/researchSync';
+import {
+  collectAndAnalyzePapers,
+  generateMonthlyTrendReport,
+  getKstScheduleContext,
+  retryFailedPapers,
+  togglePaperVisibility,
+} from '../lib/youthPaperSync';
 import { DEFAULT_PUBLIC_SETTINGS, seedInitialWorkspaceData } from '../lib/seedData';
 import {
   ACTIVITY_PRESET_IMAGES,
@@ -52,12 +72,17 @@ import {
   LIMITS,
   MemberPublic,
   MembershipStatus,
+  MonthlyTrendReport,
+  PaperRecord,
   PublicSettings,
   ResearchComment,
+  ResearchSyncLog,
+  ResearchSyncStatus,
   ResearchTrend,
   resolveKakaoChatUrl,
   TrendCategory,
   UserProfile,
+  YOUTH_RESEARCH_CATEGORIES,
 } from '../types/community';
 import {
   formatKoreanDate,
@@ -66,7 +91,7 @@ import {
   resolveAssetUrl,
 } from './NotionPrimitives';
 
-type AdminSubTab = 'members' | 'content' | 'moderation' | 'kakao';
+type AdminSubTab = 'members' | 'content' | 'moderation' | 'research' | 'kakao';
 
 const STATUS_LABELS: Record<MembershipStatus, string> = {
   pending: '관리자 인증 대기',
@@ -78,13 +103,29 @@ const STATUS_LABELS: Record<MembershipStatus, string> = {
 export function AdminConsolePage({
   publicSettings,
   activities,
+  researchSyncStatus = null,
+  papers = [],
+  monthlyReports = [],
 }: {
   publicSettings: PublicSettings | null;
   activities: CouncilActivity[];
+  researchSyncStatus?: ResearchSyncStatus | null;
+  papers?: PaperRecord[];
+  monthlyReports?: MonthlyTrendReport[];
 }) {
   const { authUser, profile, isAdmin, loginWithGoogle } = useAuth();
   const [subTab, setSubTab] = useState<AdminSubTab>('members');
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [syncingKciMode, setSyncingKciMode] = useState<'initial_1y' | 'biweekly' | null>(null);
+  const [togglingKciAuto, setTogglingKciAuto] = useState(false);
+
+  // Youth Research Automation State
+  const [syncLogs, setSyncLogs] = useState<ResearchSyncLog[]>([]);
+  const [runningYouthSync, setRunningYouthSync] = useState(false);
+  const [retryingFailed, setRetryingFailed] = useState(false);
+  const [generatingMonthlyReport, setGeneratingMonthlyReport] = useState(false);
+  const [confirmDeletePaperId, setConfirmDeletePaperId] = useState<string | null>(null);
+  const [confirmDeleteReportId, setConfirmDeleteReportId] = useState<string | null>(null);
 
   // Members & Admins State
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -244,6 +285,14 @@ export function AdminConsolePage({
       (error) => handleFirestoreError(error, OperationType.GET, 'settings/communityLinks')
     );
 
+    const unsubSyncLogs = onSnapshot(
+      query(collection(db, 'syncLogs'), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setSyncLogs(snap.docs.slice(0, 15).map((d) => d.data() as ResearchSyncLog));
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'syncLogs')
+    );
+
     return () => {
       unsubUsers();
       unsubMembers();
@@ -251,6 +300,7 @@ export function AdminConsolePage({
       unsubBoard();
       unsubTrends();
       unsubKakao();
+      unsubSyncLogs();
     };
   }, [isAdmin]);
 
@@ -661,6 +711,169 @@ export function AdminConsolePage({
     }
   };
 
+  const handleAdminResearchSync = async (mode: 'initial_1y' | 'biweekly') => {
+    if (!authUser || syncingKciMode || researchSyncStatus?.lastSyncStatus === 'syncing') return;
+    setSyncingKciMode(mode);
+    try {
+      const result = await runResearchSync({
+        mode,
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+        existingTrends: researchTrends,
+        autoEnabled: researchSyncStatus?.autoEnabled ?? true,
+        currentStatus: researchSyncStatus,
+      });
+      showToast(result.ok ? 'ok' : 'err', result.message);
+    } finally {
+      setSyncingKciMode(null);
+    }
+  };
+
+  const handleAdminToggleResearchAuto = async () => {
+    if (!authUser || togglingKciAuto) return;
+    const nextEnabled = !(researchSyncStatus?.autoEnabled !== false);
+    setTogglingKciAuto(true);
+    try {
+      await toggleResearchAutoSync({
+        enabled: nextEnabled,
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+        currentStatus: researchSyncStatus,
+      });
+      showToast(
+        'ok',
+        nextEnabled
+          ? '자동 논문 수집 스케줄이 활성화되었습니다.'
+          : '자동 논문 수집 스케줄이 일시 중지되었습니다.'
+      );
+    } finally {
+      setTogglingKciAuto(false);
+    }
+  };
+
+  // Youth Research Trends Admin Actions
+  const kstCtx = useMemo(() => getKstScheduleContext(), []);
+  const failedPapers = useMemo(
+    () => papers.filter((p) => p.analysisStatus === 'failed'),
+    [papers]
+  );
+  const completedPapersCount = useMemo(
+    () => papers.filter((p) => p.analysisStatus === 'completed').length,
+    [papers]
+  );
+  const domesticPapersCount = useMemo(
+    () => papers.filter((p) => p.region === 'domestic').length,
+    [papers]
+  );
+  const monthlyNewPapersCount = useMemo(
+    () =>
+      papers.filter((p) => {
+        if (p.createdAt && typeof p.createdAt.toDate === 'function') {
+          return getKstScheduleContext(p.createdAt.toDate()).currentMonthKey === kstCtx.currentMonthKey;
+        }
+        return (p.publicationDate || '').startsWith(kstCtx.currentMonthKey);
+      }).length,
+    [papers, kstCtx.currentMonthKey]
+  );
+
+  const handleYouthManualCollect = async () => {
+    if (!authUser || runningYouthSync || researchSyncStatus?.lastSyncStatus === 'syncing') return;
+    setRunningYouthSync(true);
+    try {
+      const res = await collectAndAnalyzePapers({
+        triggerType: 'manual',
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+        existingPapers: papers,
+        autoEnabled: researchSyncStatus?.autoEnabled ?? true,
+        currentStatus: researchSyncStatus,
+        perCategoryLimit: 3,
+        generateReportToo: true,
+      });
+      showToast(res.ok ? 'ok' : 'err', res.message);
+    } finally {
+      setRunningYouthSync(false);
+    }
+  };
+
+  const handleRetryFailedAnalysis = async () => {
+    if (!authUser || retryingFailed || failedPapers.length === 0) return;
+    setRetryingFailed(true);
+    try {
+      const res = await retryFailedPapers({
+        failedPapers,
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+      });
+      showToast(res.ok ? 'ok' : 'err', res.message);
+    } finally {
+      setRetryingFailed(false);
+    }
+  };
+
+  const handleAdminGenerateMonthlyReport = async () => {
+    if (!authUser || generatingMonthlyReport) return;
+    setGeneratingMonthlyReport(true);
+    try {
+      const res = await generateMonthlyTrendReport({
+        papers,
+        newPapersCount: monthlyNewPapersCount,
+        authUser,
+        isPublished: true,
+      });
+      showToast(res.ok ? 'ok' : 'err', res.message);
+    } finally {
+      setGeneratingMonthlyReport(false);
+    }
+  };
+
+  const handleTogglePaperPublish = async (paper: PaperRecord) => {
+    try {
+      await togglePaperVisibility(paper);
+      showToast(
+        'ok',
+        !paper.isPublished ? '논문이 연구동향 페이지에 공개되었습니다.' : '논문이 비공개로 전환되었습니다.'
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `papers/${paper.paperId}`);
+    }
+  };
+
+  const handleDeletePaper = async (paperId: string) => {
+    try {
+      await deleteDoc(doc(db, 'papers', paperId));
+      setConfirmDeletePaperId(null);
+      showToast('ok', '논문 데이터가 삭제되었습니다.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `papers/${paperId}`);
+    }
+  };
+
+  const handleToggleReportPublish = async (report: MonthlyTrendReport) => {
+    try {
+      await updateDoc(doc(db, 'monthlyReports', report.reportId), {
+        isPublished: !report.isPublished,
+        updatedAt: serverTimestamp(),
+      });
+      showToast(
+        'ok',
+        !report.isPublished ? '월간 보고서가 공개되었습니다.' : '월간 보고서가 비공개로 전환되었습니다.'
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `monthlyReports/${report.reportId}`);
+    }
+  };
+
+  const handleDeleteMonthlyReport = async (reportId: string) => {
+    try {
+      await deleteDoc(doc(db, 'monthlyReports', reportId));
+      setConfirmDeleteReportId(null);
+      showToast('ok', '월간 보고서가 삭제되었습니다.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `monthlyReports/${reportId}`);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-5 sm:px-10 py-8 sm:py-10">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6 border-b border-stone-200 mb-6">
@@ -733,6 +946,18 @@ export function AdminConsolePage({
         >
           <FileText className="w-3.5 h-3.5" />
           게시글 · 댓글 통합 관리
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('research')}
+          className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+            subTab === 'research'
+              ? 'bg-white text-stone-900 shadow-sm'
+              : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          연구동향 AI 관리 ({papers.length})
         </button>
         <button
           type="button"
@@ -1214,6 +1439,109 @@ export function AdminConsolePage({
       {/* TAB 3: POSTS & COMMENTS MODERATION */}
       {subTab === 'moderation' && (
         <div className="space-y-6">
+          {/* Google Scholar AI Auto-Sync Status Summary Card */}
+          <div className="rounded-xl border border-[#D5DFEE] bg-[#F4F7FB] p-4 sm:p-5 space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-white border border-[#D5DFEE] flex items-center justify-center shrink-0 text-[#002968]">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-sm font-bold text-stone-900">
+                      구글 학술검색 연구 동향 AI 자동 동기화 상태
+                    </h2>
+                    <span className="text-stone-300" aria-hidden="true">
+                      ·
+                    </span>
+                    {syncingKciMode !== null || researchSyncStatus?.lastSyncStatus === 'syncing' ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#002968]">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        동기화 진행 중
+                      </span>
+                    ) : researchSyncStatus?.lastSyncStatus === 'success' ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                        정상 동기화 완료
+                      </span>
+                    ) : researchSyncStatus?.lastSyncStatus === 'error' ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-700">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-600" />
+                        동기화 오류
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800">
+                        <Clock className="w-3.5 h-3.5 text-amber-700" />
+                        초기 연동 대기
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-stone-600 mt-0.5">
+                    최근 업데이트:{' '}
+                    <span className="font-mono tabular-nums font-medium text-stone-800">
+                      {researchSyncStatus?.lastSyncedAt
+                        ? formatKoreanDateTime(researchSyncStatus.lastSyncedAt)
+                        : '미실행'}
+                    </span>
+                    <span className="mx-1.5 text-stone-300" aria-hidden="true">
+                      ·
+                    </span>
+                    다음 예정:{' '}
+                    <span className="font-mono tabular-nums font-medium text-stone-800">
+                      {researchSyncStatus?.autoEnabled === false
+                        ? '자동 동기화 중지됨'
+                        : researchSyncStatus?.nextSyncAt
+                          ? `${formatKoreanDate(researchSyncStatus.nextSyncAt)} (2주 주기)`
+                          : '동기화 후 자동 예약'}
+                    </span>
+                    {researchSyncStatus?.lastSyncMessage && (
+                      <>
+                        <span className="mx-1.5 text-stone-300" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="text-stone-700">{researchSyncStatus.lastSyncMessage}</span>
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={
+                    syncingKciMode !== null || researchSyncStatus?.lastSyncStatus === 'syncing'
+                  }
+                  onClick={() => handleAdminResearchSync('initial_1y')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${syncingKciMode === 'initial_1y' ? 'animate-spin' : ''}`}
+                  />
+                  최근 1년 논문 동기화
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    syncingKciMode !== null || researchSyncStatus?.lastSyncStatus === 'syncing'
+                  }
+                  onClick={() => handleAdminResearchSync('biweekly')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  2주 최신 업데이트
+                </button>
+                <button
+                  type="button"
+                  disabled={togglingKciAuto}
+                  onClick={handleAdminToggleResearchAuto}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 hover:bg-stone-50 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  {researchSyncStatus?.autoEnabled === false ? '자동 동기화: 꺼짐' : '자동 동기화: 켜짐'}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center gap-1 p-1 bg-stone-100 rounded-lg w-fit">
             <button
               type="button"
@@ -1580,7 +1908,393 @@ export function AdminConsolePage({
         </div>
       )}
 
-      {/* TAB 4: KAKAOTALK SETTINGS */}
+      {/* TAB 4: YOUTH RESEARCH TRENDS AI COLLECTION & REPORTS */}
+      {subTab === 'research' && (
+        <section className="space-y-6">
+          {/* Status & Schedule Control Card */}
+          <div className="rounded-xl border border-[#D5DFEE] bg-[#F4F7FB] p-5 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-bold text-stone-900">
+                    월간 논문 자동 수집 · Gemini AI 분석 현황
+                  </h2>
+                  <span className="text-stone-300" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="text-xs font-semibold text-[#002968]">
+                    스케줄: {kstCtx.cron} ({kstCtx.timezone})
+                  </span>
+                </div>
+                <p className="text-xs text-stone-600">
+                  마지막 업데이트:{' '}
+                  <span className="font-mono font-medium text-stone-800">
+                    {researchSyncStatus?.lastSyncedAt
+                      ? formatKoreanDateTime(researchSyncStatus.lastSyncedAt)
+                      : '미실행'}
+                  </span>
+                  <span className="mx-1.5 text-stone-300" aria-hidden="true">
+                    ·
+                  </span>
+                  다음 정기 실행:{' '}
+                  <span className="font-mono font-medium text-stone-800">
+                    {kstCtx.nextRunLabel}
+                  </span>
+                </p>
+                {researchSyncStatus?.lastSyncMessage && (
+                  <p className="text-xs text-stone-700">{researchSyncStatus.lastSyncMessage}</p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleYouthManualCollect}
+                  disabled={runningYouthSync || researchSyncStatus?.lastSyncStatus === 'syncing'}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${runningYouthSync ? 'animate-spin' : ''}`}
+                  />
+                  {runningYouthSync ? '수집 · 분석 실행 중...' : '수동 업데이트 실행'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRetryFailedAnalysis}
+                  disabled={retryingFailed || failedPapers.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-50 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
+                  {retryingFailed
+                    ? '재분석 중...'
+                    : `실패 논문 재분석 (${failedPapers.length}건)`}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAdminGenerateMonthlyReport}
+                  disabled={generatingMonthlyReport || papers.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-50 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <FileBarChart2 className="w-3.5 h-3.5 text-[#002968]" />
+                  {generatingMonthlyReport ? '보고서 생성 중...' : '월간 보고서 생성'}
+                </button>
+              </div>
+            </div>
+
+            {/* KPI Strip */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+              <div className="rounded-lg bg-white border border-stone-200 p-3.5">
+                <p className="text-[11px] text-stone-500">전체 수집 논문 (국내 · 해외)</p>
+                <p className="text-lg font-bold text-stone-900 tabular-nums mt-0.5">
+                  {papers.length}편{' '}
+                  <span className="text-xs font-normal text-stone-500">
+                    (국내 {domesticPapersCount} · 해외 {papers.length - domesticPapersCount})
+                  </span>
+                </p>
+              </div>
+              <div className="rounded-lg bg-white border border-stone-200 p-3.5">
+                <p className="text-[11px] text-stone-500">이번 달 신규 수집</p>
+                <p className="text-lg font-bold text-[#002968] tabular-nums mt-0.5">
+                  {monthlyNewPapersCount}편
+                </p>
+              </div>
+              <div className="rounded-lg bg-white border border-stone-200 p-3.5">
+                <p className="text-[11px] text-stone-500">AI 분석 완료 / 실패</p>
+                <p className="text-lg font-bold tabular-nums mt-0.5">
+                  <span className="text-emerald-700">{completedPapersCount} 완료</span>
+                  <span className="text-stone-300 mx-1.5">/</span>
+                  <span className={failedPapers.length > 0 ? 'text-red-700' : 'text-stone-500'}>
+                    {failedPapers.length} 실패
+                  </span>
+                </p>
+              </div>
+              <div className="rounded-lg bg-white border border-stone-200 p-3.5">
+                <p className="text-[11px] text-stone-500">최근 실행 API · 토큰 사용량</p>
+                <p className="text-xs font-semibold text-stone-900 tabular-nums mt-1">
+                  {syncLogs[0]
+                    ? `OA ${syncLogs[0].openAlexCalls} · CR ${syncLogs[0].crossrefCalls} · AI ${syncLogs[0].geminiCalls} (${syncLogs[0].estimatedTokens.toLocaleString()} tok)`
+                    : '실행 기록 대기 중'}
+                </p>
+              </div>
+            </div>
+
+            {/* Category Breakdown */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {YOUTH_RESEARCH_CATEGORIES.map((cat) => {
+                const count = papers.filter((p) => p.mainCategory === cat).length;
+                return (
+                  <div
+                    key={cat}
+                    className="rounded-md bg-white border border-stone-200 px-3 py-2 text-xs"
+                  >
+                    <p className="text-stone-500 truncate">{cat}</p>
+                    <p className="font-bold text-stone-900 tabular-nums mt-0.5">{count}편</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Papers Visibility & Analysis Management Table */}
+          <div className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3] flex items-center justify-between">
+              <h3 className="text-sm font-bold text-stone-900">
+                수집 논문 공개·비공개 및 분석 상태 관리 ({papers.length}편)
+              </h3>
+              <span className="text-xs text-stone-500">
+                공개 설정된 논문만 일반 방문자에게 노출됩니다
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[780px] text-xs">
+                <thead>
+                  <tr className="border-b border-stone-200 bg-stone-50 text-stone-600 font-semibold">
+                    <th className="py-2.5 px-4">논문 제목 · 학술지</th>
+                    <th className="py-2.5 px-3">대표 분야</th>
+                    <th className="py-2.5 px-3">구분 · 발행일</th>
+                    <th className="py-2.5 px-3">AI 분석</th>
+                    <th className="py-2.5 px-3">공개 여부</th>
+                    <th className="py-2.5 px-4 text-right">관리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {papers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-stone-500">
+                        수집된 논문이 없습니다. [수동 업데이트 실행]을 눌러 첫 수집을 시작하세요.
+                      </td>
+                    </tr>
+                  ) : (
+                    papers.map((p) => (
+                      <tr key={p.paperId} className="hover:bg-[#F7F6F3]/60">
+                        <td className="py-3 px-4 max-w-md">
+                          <p className="font-semibold text-stone-900 line-clamp-1">{p.title}</p>
+                          <p className="text-[11px] text-stone-500 truncate">{p.journalName}</p>
+                        </td>
+                        <td className="py-3 px-3 text-stone-700 whitespace-nowrap">
+                          {p.mainCategory}
+                        </td>
+                        <td className="py-3 px-3 text-stone-600 whitespace-nowrap tabular-nums">
+                          {p.region === 'domestic' ? '국내' : '해외'} · {p.publicationDate}
+                        </td>
+                        <td className="py-3 px-3 whitespace-nowrap">
+                          {p.analysisStatus === 'completed' ? (
+                            <span className="text-emerald-700 font-semibold">완료</span>
+                          ) : (
+                            <span
+                              className="text-red-700 font-semibold"
+                              title={p.analysisError || '분석 실패'}
+                            >
+                              실패
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePaperPublish(p)}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium cursor-pointer ${
+                              p.isPublished
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : 'bg-stone-100 text-stone-600 border border-stone-200'
+                            }`}
+                          >
+                            {p.isPublished ? (
+                              <>
+                                <Eye className="w-3 h-3" /> 공개중
+                              </>
+                            ) : (
+                              <>
+                                <EyeOff className="w-3 h-3" /> 비공개
+                              </>
+                            )}
+                          </button>
+                        </td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          {confirmDeletePaperId === p.paperId ? (
+                            <span className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePaper(p.paperId)}
+                                className="px-2 py-1 text-[11px] text-white bg-red-600 rounded cursor-pointer"
+                              >
+                                삭제 확인
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeletePaperId(null)}
+                                className="px-2 py-1 text-[11px] text-stone-500 cursor-pointer"
+                              >
+                                취소
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeletePaperId(p.paperId)}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              삭제
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Monthly Trend Reports Management */}
+          <div className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3] flex items-center justify-between">
+              <h3 className="text-sm font-bold text-stone-900">
+                월간 연구동향 보고서 관리 ({monthlyReports.length}건)
+              </h3>
+            </div>
+            <div className="divide-y divide-stone-100">
+              {monthlyReports.length === 0 ? (
+                <p className="p-6 text-center text-xs text-stone-500">
+                  생성된 월간 연구동향 보고서가 없습니다.
+                </p>
+              ) : (
+                monthlyReports.map((rep) => (
+                  <div
+                    key={rep.reportId}
+                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div>
+                      <p className="text-sm font-bold text-stone-900">
+                        {rep.monthLabel} 청소년지도 연구동향 보고서
+                      </p>
+                      <p className="text-xs text-stone-500 tabular-nums mt-0.5">
+                        {rep.periodRange} · 전체 {rep.totalPapersCount}편 (국내 {rep.domesticCount} /
+                        해외 {rep.internationalCount})
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleReportPublish(rep)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded cursor-pointer ${
+                          rep.isPublished
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            : 'bg-stone-100 text-stone-600 border border-stone-200'
+                        }`}
+                      >
+                        {rep.isPublished ? '공개중' : '비공개'}
+                      </button>
+                      {confirmDeleteReportId === rep.reportId ? (
+                        <span className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMonthlyReport(rep.reportId)}
+                            className="px-2 py-1 text-xs text-white bg-red-600 rounded cursor-pointer"
+                          >
+                            삭제 확인
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteReportId(null)}
+                            className="px-2 py-1 text-xs text-stone-500 cursor-pointer"
+                          >
+                            취소
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteReportId(rep.reportId)}
+                          className="px-2.5 py-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded cursor-pointer"
+                        >
+                          삭제
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Collection & Analysis Execution Logs */}
+          <div className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3]">
+              <h3 className="text-sm font-bold text-stone-900">
+                자동 수집 · AI 분석 실행 및 오류 로그 (최근 {syncLogs.length}건)
+              </h3>
+            </div>
+            <div className="divide-y divide-stone-100 text-xs">
+              {syncLogs.length === 0 ? (
+                <p className="p-6 text-center text-stone-500">아직 기록된 실행 로그가 없습니다.</p>
+              ) : (
+                syncLogs.map((log) => (
+                  <div key={log.logId} className="p-4 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`font-semibold ${
+                            log.status === 'success'
+                              ? 'text-emerald-700'
+                              : log.status === 'partial'
+                                ? 'text-amber-700'
+                                : 'text-red-700'
+                          }`}
+                        >
+                          {log.status === 'success'
+                            ? '정상 완료'
+                            : log.status === 'partial'
+                              ? '부분 오류'
+                              : '실행 오류'}
+                        </span>
+                        <span className="text-stone-300" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="font-medium text-stone-800">
+                          {log.triggerType === 'scheduled_monthly'
+                            ? '월간 정기 자동'
+                            : log.triggerType === 'retry_failed'
+                              ? '실패 논문 재분석'
+                              : '수동 실행'}
+                        </span>
+                        <span className="text-stone-300" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="text-stone-600 tabular-nums">
+                          신규 {log.newPapersCount}편 (국내 {log.domesticCount} · 해외{' '}
+                          {log.internationalCount}) · AI 성공 {log.analyzedSuccessCount} / 실패{' '}
+                          {log.analyzedFailedCount}
+                        </span>
+                      </div>
+                      <span className="font-mono text-stone-500 tabular-nums">
+                        {formatKoreanDateTime(log.createdAt)} · {log.executedByName}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-500 tabular-nums">
+                      API 호출: OpenAlex {log.openAlexCalls}회 · Crossref {log.crossrefCalls}회 ·
+                      Gemini {log.geminiCalls}회 · 토큰 {log.estimatedTokens.toLocaleString()}
+                    </p>
+                    {(log.collectionErrors.length > 0 || log.analysisErrors.length > 0) && (
+                      <div className="rounded bg-red-50 border border-red-100 p-2.5 text-[11px] text-red-800 space-y-0.5">
+                        {log.collectionErrors.map((e, idx) => (
+                          <p key={`ce_${idx}`}>[수집 오류] {e}</p>
+                        ))}
+                        {log.analysisErrors.map((e, idx) => (
+                          <p key={`ae_${idx}`}>[분석 오류] {e}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* TAB 5: KAKAOTALK SETTINGS */}
       {subTab === 'kakao' && (
         <section className="max-w-2xl rounded-xl border border-stone-200 bg-white p-6">
           <h2 className="text-lg font-bold text-stone-900 mb-1">카카오톡 오픈채팅방 연결 설정</h2>
