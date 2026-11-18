@@ -1,0 +1,470 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private graduate student council member profile and membership application record containing PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the user."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 160,
+          "description": "Verified Google account email address."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Member full name."
+        },
+        "cohort": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Admission cohort (e.g. 2026 전기)."
+        },
+        "program": {
+          "type": "string",
+          "enum": ["석사과정", "박사과정", "석박사통합과정"],
+          "description": "Graduate degree program."
+        },
+        "academicStatus": {
+          "type": "string",
+          "enum": ["재학", "수료", "졸업"],
+          "description": "Current academic enrollment status."
+        },
+        "studentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30,
+          "description": "Graduate student ID number (PII)."
+        },
+        "researchInterest": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "description": "Primary research interests."
+        },
+        "applicationNote": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 400,
+          "description": "Optional note for council membership verification."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected", "suspended"],
+          "description": "Council membership approval state."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "cohort",
+        "program",
+        "academicStatus",
+        "studentId",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MemberPublic": {
+      "title": "MemberPublic",
+      "description": "Non-PII directory entry for approved graduate council members.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "cohort": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "program": {
+          "type": "string",
+          "enum": ["석사과정", "박사과정", "석박사통합과정"]
+        },
+        "academicStatus": {
+          "type": "string",
+          "enum": ["재학", "수료", "졸업"]
+        },
+        "researchInterest": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "roleTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "cohort",
+        "program",
+        "academicStatus",
+        "roleTitle",
+        "updatedAt"
+      ]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted admin role assignment document.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "grantedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "displayName", "grantedBy", "createdAt"]
+    },
+    "PublicSettings": {
+      "title": "PublicSettings",
+      "description": "Public council overview metadata for the Notion-style landing page.",
+      "type": "object",
+      "properties": {
+        "councilName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "semesterLabel": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "welcomeHeadline": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "welcomeSummary": { "type": "string", "minLength": 1, "maxLength": 1200 },
+        "executiveNotice": { "type": "string", "minLength": 0, "maxLength": 600 },
+        "departmentIntro": { "type": "string", "minLength": 0, "maxLength": 2000 },
+        "coverImageUrl": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "councilName",
+        "semesterLabel",
+        "welcomeHeadline",
+        "welcomeSummary",
+        "updatedAt"
+      ]
+    },
+    "CommunityLinks": {
+      "title": "CommunityLinks",
+      "description": "Member-only KakaoTalk Open Chat links and participation codes.",
+      "type": "object",
+      "properties": {
+        "mainChatTitle": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "mainChatUrl": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "mainChatPasscode": { "type": "string", "minLength": 0, "maxLength": 40 },
+        "studyChatTitle": { "type": "string", "minLength": 0, "maxLength": 100 },
+        "studyChatUrl": { "type": "string", "minLength": 0, "maxLength": 400 },
+        "roomRules": { "type": "string", "minLength": 0, "maxLength": 1000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["mainChatTitle", "mainChatUrl", "updatedAt"]
+    },
+    "CouncilActivity": {
+      "title": "CouncilActivity",
+      "description": "Student council activities, academic colloquiums, and field trips.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "category": {
+          "type": "string",
+          "enum": ["학술·세미나", "원우 교류", "현장 탐방", "공지사항"]
+        },
+        "eventDate": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "location": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "summary": { "type": "string", "minLength": 2, "maxLength": 300 },
+        "content": { "type": "string", "minLength": 2, "maxLength": 6000 },
+        "imageUrl": { "type": "string", "minLength": 0, "maxLength": 400 },
+        "isPublished": { "type": "boolean" },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "title",
+        "category",
+        "eventDate",
+        "location",
+        "summary",
+        "content",
+        "isPublished",
+        "authorUid",
+        "authorName",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BoardPost": {
+      "title": "BoardPost",
+      "description": "Member-only community bulletin board post (notices, private study recruitment, Q&A, free board).",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "category": {
+          "type": "string",
+          "enum": ["공지사항", "스터디 모집", "학사·논문 Q&A", "자유게시판"]
+        },
+        "content": { "type": "string", "minLength": 2, "maxLength": 10000 },
+        "isPinned": { "type": "boolean" },
+        "recruitStatus": {
+          "type": "string",
+          "enum": ["모집중", "마감", "해당없음"]
+        },
+        "studySchedule": { "type": "string", "minLength": 0, "maxLength": 120 },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "authorCohort": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "title",
+        "category",
+        "content",
+        "isPinned",
+        "recruitStatus",
+        "authorUid",
+        "authorName",
+        "authorCohort",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BoardComment": {
+      "title": "BoardComment",
+      "description": "Member comment on a board post.",
+      "type": "object",
+      "properties": {
+        "postId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "authorCohort": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "content": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "postId",
+        "authorUid",
+        "authorName",
+        "authorCohort",
+        "content",
+        "createdAt"
+      ]
+    },
+    "ResearchTrend": {
+      "title": "ResearchTrend",
+      "description": "Shared youth guidance and policy research trend article.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 2, "maxLength": 150 },
+        "category": {
+          "type": "string",
+          "enum": [
+            "청소년정책·제도",
+            "상담·심리지원",
+            "디지털·미디어",
+            "진로·자립지원",
+            "학술논문·방법론",
+            "학회·공모전"
+          ]
+        },
+        "source": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "publishedPeriod": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "externalUrl": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "summary": { "type": "string", "minLength": 5, "maxLength": 5000 },
+        "keyTakeaway": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "isPinned": { "type": "boolean" },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "authorCohort": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "title",
+        "category",
+        "source",
+        "publishedPeriod",
+        "summary",
+        "isPinned",
+        "authorUid",
+        "authorName",
+        "authorCohort",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ResearchComment": {
+      "title": "ResearchComment",
+      "description": "Discussion comment on a shared research trend.",
+      "type": "object",
+      "properties": {
+        "trendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "authorCohort": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "content": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "trendId",
+        "authorUid",
+        "authorName",
+        "authorCohort",
+        "content",
+        "createdAt"
+      ]
+    },
+    "TrendBookmark": {
+      "title": "TrendBookmark",
+      "description": "Private member bookmark for a research trend.",
+      "type": "object",
+      "properties": {
+        "trendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["trendId", "title", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private member profile and application state (PII isolated to owner and admins)."
+    },
+    "/users/{userId}/bookmarks/{trendId}": {
+      "schema": { "$ref": "#/entities/TrendBookmark" },
+      "description": "Private research trend bookmarks owned by the user."
+    },
+    "/membersPublic/{memberId}": {
+      "schema": { "$ref": "#/entities/MemberPublic" },
+      "description": "Approved graduate council members directory (no PII) and membership gate."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Admin role assignment documents."
+    },
+    "/settings/public": {
+      "schema": { "$ref": "#/entities/PublicSettings" },
+      "description": "Public council overview settings."
+    },
+    "/settings/communityLinks": {
+      "schema": { "$ref": "#/entities/CommunityLinks" },
+      "description": "Member-only KakaoTalk Open Chat links and passcode."
+    },
+    "/activities/{activityId}": {
+      "schema": { "$ref": "#/entities/CouncilActivity" },
+      "description": "Council activities and schedule items."
+    },
+    "/boardPosts/{postId}": {
+      "schema": { "$ref": "#/entities/BoardPost" },
+      "description": "Member-only bulletin board posts supporting full CRUD."
+    },
+    "/boardPosts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/BoardComment" },
+      "description": "Comments on member-only board posts."
+    },
+    "/researchTrends/{trendId}": {
+      "schema": { "$ref": "#/entities/ResearchTrend" },
+      "description": "Member-only shared youth guidance research trends."
+    },
+    "/researchTrends/{trendId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/ResearchComment" },
+      "description": "Member discussion comments on research trends."
+    }
+  }
+}

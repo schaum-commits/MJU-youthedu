@@ -1,0 +1,480 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedEmail() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedEmail() && request.auth.token.email == 'schaum@mju.ac.kr';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedEmail() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isApprovedMember() {
+      return isAdmin() || (
+        isVerifiedEmail() &&
+        exists(/databases/$(database)/documents/membersPublic/$(request.auth.uid))
+      );
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid', 'email', 'displayName', 'cohort', 'program',
+          'academicStatus', 'studentId', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'cohort', 'program',
+          'academicStatus', 'studentId', 'researchInterest', 'applicationNote',
+          'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        data.cohort is string && data.cohort.size() >= 1 && data.cohort.size() <= 40 &&
+        data.program in ['석사과정', '박사과정', '석박사통합과정'] &&
+        data.academicStatus in ['재학', '수료', '졸업'] &&
+        data.studentId is string && data.studentId.size() >= 1 && data.studentId.size() <= 30 &&
+        (!('researchInterest' in data) || (data.researchInterest is string && data.researchInterest.size() <= 200)) &&
+        (!('applicationNote' in data) || (data.applicationNote is string && data.applicationNote.size() <= 400)) &&
+        data.status in ['pending', 'approved', 'rejected', 'suspended'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMemberPublic(data) {
+      return data.keys().hasAll([
+          'uid', 'displayName', 'cohort', 'program', 'academicStatus', 'roleTitle', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'displayName', 'cohort', 'program', 'academicStatus',
+          'researchInterest', 'roleTitle', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        data.cohort is string && data.cohort.size() >= 1 && data.cohort.size() <= 40 &&
+        data.program in ['석사과정', '박사과정', '석박사통합과정'] &&
+        data.academicStatus in ['재학', '수료', '졸업'] &&
+        (!('researchInterest' in data) || (data.researchInterest is string && data.researchInterest.size() <= 200)) &&
+        data.roleTitle is string && data.roleTitle.size() >= 1 && data.roleTitle.size() <= 60 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'grantedBy', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'grantedBy', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        isValidId(data.grantedBy) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPublicSettings(data) {
+      return data.keys().hasAll(['councilName', 'semesterLabel', 'welcomeHeadline', 'welcomeSummary', 'updatedAt']) &&
+        data.keys().hasOnly(['councilName', 'semesterLabel', 'welcomeHeadline', 'welcomeSummary', 'executiveNotice', 'departmentIntro', 'coverImageUrl', 'updatedAt']) &&
+        data.councilName is string && data.councilName.size() >= 1 && data.councilName.size() <= 100 &&
+        data.semesterLabel is string && data.semesterLabel.size() >= 1 && data.semesterLabel.size() <= 60 &&
+        data.welcomeHeadline is string && data.welcomeHeadline.size() >= 1 && data.welcomeHeadline.size() <= 140 &&
+        data.welcomeSummary is string && data.welcomeSummary.size() >= 1 && data.welcomeSummary.size() <= 1200 &&
+        (!('executiveNotice' in data) || (data.executiveNotice is string && data.executiveNotice.size() <= 600)) &&
+        (!('departmentIntro' in data) || (data.departmentIntro is string && data.departmentIntro.size() <= 2000)) &&
+        (!('coverImageUrl' in data) || (data.coverImageUrl is string && data.coverImageUrl.size() <= 500)) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCommunityLinks(data) {
+      return data.keys().hasAll(['mainChatTitle', 'mainChatUrl', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'mainChatTitle', 'mainChatUrl', 'mainChatPasscode',
+          'studyChatTitle', 'studyChatUrl', 'roomRules', 'updatedAt'
+        ]) &&
+        data.mainChatTitle is string && data.mainChatTitle.size() >= 1 && data.mainChatTitle.size() <= 100 &&
+        data.mainChatUrl is string && data.mainChatUrl.size() >= 1 && data.mainChatUrl.size() <= 400 &&
+        (!('mainChatPasscode' in data) || (data.mainChatPasscode is string && data.mainChatPasscode.size() <= 40)) &&
+        (!('studyChatTitle' in data) || (data.studyChatTitle is string && data.studyChatTitle.size() <= 100)) &&
+        (!('studyChatUrl' in data) || (data.studyChatUrl is string && data.studyChatUrl.size() <= 400)) &&
+        (!('roomRules' in data) || (data.roomRules is string && data.roomRules.size() <= 1000)) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidActivity(data) {
+      return data.keys().hasAll([
+          'title', 'category', 'eventDate', 'location', 'summary', 'content',
+          'isPublished', 'authorUid', 'authorName', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'category', 'eventDate', 'location', 'summary', 'content',
+          'imageUrl', 'isPublished', 'authorUid', 'authorName', 'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+        data.category in ['학술·세미나', '원우 교류', '현장 탐방', '공지사항'] &&
+        data.eventDate is string && data.eventDate.size() >= 1 && data.eventDate.size() <= 40 &&
+        data.location is string && data.location.size() >= 1 && data.location.size() <= 120 &&
+        data.summary is string && data.summary.size() >= 2 && data.summary.size() <= 300 &&
+        data.content is string && data.content.size() >= 2 && data.content.size() <= 6000 &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 400)) &&
+        data.isPublished is bool &&
+        isValidId(data.authorUid) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBoardPost(data) {
+      return data.keys().hasAll([
+          'title', 'category', 'content', 'isPinned', 'recruitStatus',
+          'authorUid', 'authorName', 'authorCohort', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'category', 'content', 'isPinned', 'recruitStatus', 'studySchedule',
+          'authorUid', 'authorName', 'authorCohort', 'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+        data.category in ['공지사항', '스터디 모집', '학사·논문 Q&A', '자유게시판'] &&
+        data.content is string && data.content.size() >= 2 && data.content.size() <= 10000 &&
+        data.isPinned is bool &&
+        data.recruitStatus in ['모집중', '마감', '해당없음'] &&
+        (!('studySchedule' in data) || (data.studySchedule is string && data.studySchedule.size() <= 120)) &&
+        isValidId(data.authorUid) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60 &&
+        data.authorCohort is string && data.authorCohort.size() >= 1 && data.authorCohort.size() <= 40 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBoardComment(data) {
+      return data.keys().hasAll(['postId', 'authorUid', 'authorName', 'authorCohort', 'content', 'createdAt']) &&
+        data.keys().hasOnly(['postId', 'authorUid', 'authorName', 'authorCohort', 'content', 'createdAt']) &&
+        isValidId(data.postId) &&
+        isValidId(data.authorUid) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60 &&
+        data.authorCohort is string && data.authorCohort.size() >= 1 && data.authorCohort.size() <= 40 &&
+        data.content is string && data.content.size() >= 1 && data.content.size() <= 1500 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidResearchTrend(data) {
+      return data.keys().hasAll([
+          'title', 'category', 'source', 'publishedPeriod', 'summary',
+          'isPinned', 'authorUid', 'authorName', 'authorCohort', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'category', 'source', 'publishedPeriod', 'externalUrl',
+          'summary', 'keyTakeaway', 'isPinned', 'authorUid', 'authorName',
+          'authorCohort', 'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 150 &&
+        data.category in [
+          '청소년정책·제도', '상담·심리지원', '디지털·미디어',
+          '진로·자립지원', '학술논문·방법론', '학회·공모전'
+        ] &&
+        data.source is string && data.source.size() >= 1 && data.source.size() <= 100 &&
+        data.publishedPeriod is string && data.publishedPeriod.size() >= 1 && data.publishedPeriod.size() <= 30 &&
+        (!('externalUrl' in data) || (data.externalUrl is string && data.externalUrl.size() <= 500)) &&
+        data.summary is string && data.summary.size() >= 5 && data.summary.size() <= 5000 &&
+        (!('keyTakeaway' in data) || (data.keyTakeaway is string && data.keyTakeaway.size() <= 500)) &&
+        data.isPinned is bool &&
+        isValidId(data.authorUid) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60 &&
+        data.authorCohort is string && data.authorCohort.size() >= 1 && data.authorCohort.size() <= 40 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidResearchComment(data) {
+      return data.keys().hasAll(['trendId', 'authorUid', 'authorName', 'authorCohort', 'content', 'createdAt']) &&
+        data.keys().hasOnly(['trendId', 'authorUid', 'authorName', 'authorCohort', 'content', 'createdAt']) &&
+        isValidId(data.trendId) &&
+        isValidId(data.authorUid) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60 &&
+        data.authorCohort is string && data.authorCohort.size() >= 1 && data.authorCohort.size() <= 40 &&
+        data.content is string && data.content.size() >= 1 && data.content.size() <= 1500 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidBookmark(data) {
+      return data.keys().hasAll(['trendId', 'title', 'createdAt']) &&
+        data.keys().hasOnly(['trendId', 'title', 'createdAt']) &&
+        isValidId(data.trendId) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        data.createdAt is timestamp;
+    }
+
+    match /test/connection {
+      allow get: if true;
+      allow write: if false;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+
+      allow create: if isValidId(userId) &&
+        isVerifiedEmail() &&
+        isOwner(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == userId &&
+        incoming().email == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || incoming().status == 'pending');
+
+      allow update: if isValidId(userId) &&
+        isVerifiedEmail() &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() || (
+            isOwner(userId) &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'cohort', 'program', 'academicStatus',
+              'studentId', 'researchInterest', 'applicationNote', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(userId) && isAdmin();
+
+      match /bookmarks/{trendId} {
+        allow get: if isValidId(userId) && isValidId(trendId) && isOwner(userId) && isApprovedMember();
+        allow list: if isValidId(userId) && isOwner(userId) && isApprovedMember();
+        allow create: if isValidId(userId) && isValidId(trendId) &&
+          isOwner(userId) && isApprovedMember() &&
+          isValidBookmark(incoming()) &&
+          incoming().trendId == trendId &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/researchTrends/$(trendId));
+        allow delete: if isValidId(userId) && isValidId(trendId) && isOwner(userId) && isApprovedMember();
+      }
+    }
+
+    match /membersPublic/{memberId} {
+      allow get: if isValidId(memberId) && isApprovedMember();
+      allow list: if isApprovedMember();
+
+      allow create: if isValidId(memberId) &&
+        isAdmin() &&
+        isValidMemberPublic(incoming()) &&
+        incoming().uid == memberId &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(memberId) &&
+        isValidMemberPublic(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().updatedAt == request.time && (
+          isAdmin() || (
+            isOwner(memberId) &&
+            isApprovedMember() &&
+            incoming().roleTitle == existing().roleTitle &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'cohort', 'program', 'academicStatus',
+              'researchInterest', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(memberId) && isAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(adminId) &&
+        isAdmin() &&
+        isValidAdminRecord(incoming()) &&
+        incoming().uid == adminId &&
+        incoming().grantedBy == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(adminId) && isAdmin();
+    }
+
+    match /settings/public {
+      allow get: if true;
+      allow create, update: if isAdmin() &&
+        isValidPublicSettings(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /settings/communityLinks {
+      allow get: if isApprovedMember();
+      allow create, update: if isAdmin() &&
+        isValidCommunityLinks(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /activities/{activityId} {
+      allow get: if isValidId(activityId) && ((resource != null && existing().isPublished == true) || isAdmin());
+      allow list: if resource.data.isPublished == true || isAdmin();
+
+      allow create: if isValidId(activityId) &&
+        isAdmin() &&
+        isValidActivity(incoming()) &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(activityId) &&
+        isAdmin() &&
+        isValidActivity(incoming()) &&
+        incoming().authorUid == existing().authorUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+
+      allow delete: if isValidId(activityId) && isAdmin();
+    }
+
+    match /boardPosts/{postId} {
+      allow get: if isValidId(postId) && isApprovedMember();
+      allow list: if isApprovedMember();
+
+      allow create: if isValidId(postId) &&
+        isApprovedMember() &&
+        isValidBoardPost(incoming()) &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || incoming().isPinned == false);
+
+      allow update: if isValidId(postId) &&
+        isApprovedMember() &&
+        isValidBoardPost(incoming()) &&
+        incoming().authorUid == existing().authorUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() || (
+            existing().authorUid == request.auth.uid &&
+            incoming().isPinned == existing().isPinned &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'category', 'content', 'recruitStatus', 'studySchedule', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(postId) &&
+        isApprovedMember() &&
+        (existing().authorUid == request.auth.uid || isAdmin());
+
+      match /comments/{commentId} {
+        allow get: if isValidId(postId) && isValidId(commentId) && isApprovedMember();
+        allow list: if isValidId(postId) && isApprovedMember();
+
+        allow create: if isValidId(postId) && isValidId(commentId) &&
+          isApprovedMember() &&
+          exists(/databases/$(database)/documents/boardPosts/$(postId)) &&
+          isValidBoardComment(incoming()) &&
+          incoming().postId == postId &&
+          incoming().authorUid == request.auth.uid &&
+          incoming().createdAt == request.time;
+
+        allow update: if isValidId(postId) && isValidId(commentId) &&
+          isApprovedMember() &&
+          isValidBoardComment(incoming()) &&
+          incoming().postId == existing().postId &&
+          incoming().authorUid == existing().authorUid &&
+          incoming().createdAt == existing().createdAt &&
+          (isAdmin() || existing().authorUid == request.auth.uid) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['content']);
+
+        allow delete: if isValidId(postId) && isValidId(commentId) &&
+          isApprovedMember() &&
+          (existing().authorUid == request.auth.uid || isAdmin());
+      }
+    }
+
+    match /researchTrends/{trendId} {
+      allow get: if isValidId(trendId) && isApprovedMember();
+      allow list: if isApprovedMember();
+
+      allow create: if isValidId(trendId) &&
+        isApprovedMember() &&
+        isValidResearchTrend(incoming()) &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || incoming().isPinned == false);
+
+      allow update: if isValidId(trendId) &&
+        isApprovedMember() &&
+        isValidResearchTrend(incoming()) &&
+        incoming().authorUid == existing().authorUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() || (
+            existing().authorUid == request.auth.uid &&
+            incoming().isPinned == existing().isPinned &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'category', 'source', 'publishedPeriod',
+              'externalUrl', 'summary', 'keyTakeaway', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(trendId) &&
+        isApprovedMember() &&
+        (existing().authorUid == request.auth.uid || isAdmin());
+
+      match /comments/{commentId} {
+        allow get: if isValidId(trendId) && isValidId(commentId) && isApprovedMember();
+        allow list: if isValidId(trendId) && isApprovedMember();
+
+        allow create: if isValidId(trendId) && isValidId(commentId) &&
+          isApprovedMember() &&
+          exists(/databases/$(database)/documents/researchTrends/$(trendId)) &&
+          isValidResearchComment(incoming()) &&
+          incoming().trendId == trendId &&
+          incoming().authorUid == request.auth.uid &&
+          incoming().createdAt == request.time;
+
+        allow update: if isValidId(trendId) && isValidId(commentId) &&
+          isApprovedMember() &&
+          isValidResearchComment(incoming()) &&
+          incoming().trendId == existing().trendId &&
+          incoming().authorUid == existing().authorUid &&
+          incoming().createdAt == existing().createdAt &&
+          (isAdmin() || existing().authorUid == request.auth.uid) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['content']);
+
+        allow delete: if isValidId(trendId) && isValidId(commentId) &&
+          isApprovedMember() &&
+          (existing().authorUid == request.auth.uid || isAdmin());
+      }
+    }
+  }
+}

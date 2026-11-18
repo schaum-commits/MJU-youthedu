@@ -1,0 +1,6 @@
+{
+  "name": "명지대학교 대학원 청소년지도학과 원우회",
+  "description": "명지대학교 대학원 청소년지도학과 원우회 공식 커뮤니티 포털 — 원우회 활동, 회원 전용 게시판, 연구 동향 아카이브, 카카오톡 라운지 및 관리자 콘솔",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
