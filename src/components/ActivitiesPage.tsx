@@ -4,13 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { ActivityCategory, CouncilActivity } from '../types/community';
 import { NotionSidePeekDrawer, ResilientImage } from './NotionPrimitives';
 
-const CATEGORIES: ('전체' | ActivityCategory)[] = [
-  '전체',
-  '학술·세미나',
-  '원우 교류',
-  '현장 탐방',
-  '공지사항',
-];
+const CATEGORIES: ActivityCategory[] = ['공지사항'];
 
 export function ActivitiesPage({
   activities,
@@ -24,14 +18,14 @@ export function ActivitiesPage({
   onNavigateToAdminActivities: () => void;
 }) {
   const { isAdmin } = useAuth();
-  const [category, setCategory] = useState<'전체' | ActivityCategory>('전체');
+  const [category, setCategory] = useState<ActivityCategory>('공지사항');
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'gallery' | 'list'>('gallery');
 
   const filtered = useMemo(() => {
     return activities.filter((item) => {
       if (!isAdmin && !item.isPublished) return false;
-      if (category !== '전체' && item.category !== category) return false;
+      if (item.category !== category) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
         return (

@@ -1454,6 +1454,20 @@ export async function fetchAcademicSourcesStatus(): Promise<AcademicSourcesStatu
           endpointInfo: 'https://apis.data.go.kr/9720000/searchservice/basic',
         },
         {
+          id: 'nl',
+          name: '국립중앙도서관 Open API',
+          scope: 'domestic',
+          envVar: 'NL_API_KEY',
+          configured: false,
+          status: 'ready_needs_key',
+          stepLabel: '3단계 (서버 연결 필요)',
+          storagePermission: 'metadata_and_link',
+          aiProcessingPermission: 'abstract_or_open_fulltext_only',
+          termsSummary:
+            '정적 호스팅 환경에서는 서버 전용 API 키 상태를 조회할 수 없습니다. AI Studio 서버 환경에서 확인하세요.',
+          endpointInfo: 'https://www.nl.go.kr/NL/search/openApi/search.do',
+        },
+        {
           id: 'openalex',
           name: 'OpenAlex API',
           scope: 'international',
@@ -1525,4 +1539,64 @@ export async function testNanetPaperSearch(
     };
   }
 }
+
+export interface NlSearchTestResult {
+  ok: boolean;
+  configured: boolean;
+  status: 'connected' | 'ready_needs_key' | 'api_error' | 'static_hosting';
+  source: string;
+  query: string;
+  category?: string;
+  endpoint?: string;
+  totalCount: number;
+  papers: NanetPaperPreview[];
+  message: string;
+}
+
+export async function testNlPaperSearch(
+  query: string,
+  category = '학위논문',
+  pageNo = 1,
+  pageSize = 10
+): Promise<NlSearchTestResult> {
+  try {
+    const res = await fetch(resolveApiUrl('/api/sources/nl/search'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, category, pageNo, pageSize }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return {
+        ok: false,
+        configured: false,
+        status: 'static_hosting',
+        source: 'nl',
+        query,
+        category,
+        totalCount: 0,
+        papers: [],
+        message:
+          '현재 정적 호스팅 환경에서는 국립중앙도서관 Open API 프록시 서버를 호출할 수 없습니다. AI Studio 서버 환경 또는 VITE_API_BASE_URL 서버 연결 상태에서 테스트해 주세요.',
+      };
+    }
+    return (await res.json()) as NlSearchTestResult;
+  } catch (error) {
+    return {
+      ok: false,
+      configured: false,
+      status: 'api_error',
+      source: 'nl',
+      query,
+      category,
+      totalCount: 0,
+      papers: [],
+      message:
+        error instanceof Error
+          ? `국립중앙도서관 API 테스트 요청 실패: ${error.message}`
+          : '국립중앙도서관 API 테스트 요청에 실패했습니다.',
+    };
+  }
+}
+
 

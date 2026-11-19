@@ -57,8 +57,10 @@ import {
   getKstScheduleContext,
   isSyncActivelyRunning,
   NanetSearchTestResult,
+  NlSearchTestResult,
   retryFailedPapers,
   testNanetPaperSearch,
+  testNlPaperSearch,
   togglePaperVisibility,
 } from '../lib/youthPaperSync';
 import { DEFAULT_PUBLIC_SETTINGS, seedInitialWorkspaceData } from '../lib/seedData';
@@ -135,6 +137,10 @@ export function AdminConsolePage({
   const [nanetQuery, setNanetQuery] = useState('청소년지도');
   const [nanetTesting, setNanetTesting] = useState(false);
   const [nanetTestResult, setNanetTestResult] = useState<NanetSearchTestResult | null>(null);
+  const [nlQuery, setNlQuery] = useState('청소년지도');
+  const [nlCategory, setNlCategory] = useState('학위논문');
+  const [nlTesting, setNlTesting] = useState(false);
+  const [nlTestResult, setNlTestResult] = useState<NlSearchTestResult | null>(null);
 
   // Members & Admins State
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -846,6 +852,18 @@ export function AdminConsolePage({
       showToast(res.ok ? 'ok' : 'err', res.message);
     } finally {
       setNanetTesting(false);
+    }
+  };
+
+  const handleNlSearchTest = async () => {
+    if (nlTesting) return;
+    setNlTesting(true);
+    try {
+      const res = await testNlPaperSearch(nlQuery, nlCategory, 1, 10);
+      setNlTestResult(res);
+      showToast(res.ok ? 'ok' : 'err', res.message);
+    } finally {
+      setNlTesting(false);
     }
   };
 
@@ -2357,7 +2375,7 @@ export function AdminConsolePage({
             <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-bold text-stone-900">
-                  국내외 학술정보 API 연동 현황 · 2단계 국회도서관 검색 테스트
+                  국내외 학술정보 API 연동 현황 · 2단계 국회도서관 / 3단계 국립중앙도서관 검색 테스트
                 </h3>
                 <p className="text-xs text-stone-600 mt-0.5">
                   인증키가 없는 서비스는 임의 데이터를 생성하지 않고 연결 준비 상태로 표시합니다.
@@ -2491,6 +2509,104 @@ export function AdminConsolePage({
                               className="text-[11px] font-semibold text-[#002968] hover:underline whitespace-nowrap shrink-0"
                             >
                               원문 확인
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 3: National Library of Korea Search Test */}
+              <div className="rounded-lg border border-stone-200 bg-[#F7F6F3] p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <div className="flex-1 flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="국립중앙도서관 자료 유형"
+                      value={nlCategory}
+                      onChange={(e) => setNlCategory(e.target.value)}
+                      className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-md bg-white text-stone-700"
+                    >
+                      <option value="">전체 자료</option>
+                      <option value="학위논문">학위논문</option>
+                      <option value="잡지/학술지">잡지/학술지</option>
+                      <option value="기사">기사</option>
+                      <option value="도서">도서</option>
+                    </select>
+                    <select
+                      aria-label="국립중앙도서관 핵심 검색어 선택"
+                      value={
+                        sourcesStatus?.koreanKeywords?.core?.includes(nlQuery) ||
+                        sourcesStatus?.koreanKeywords?.extended?.includes(nlQuery)
+                          ? nlQuery
+                          : ''
+                      }
+                      onChange={(e) => {
+                        if (e.target.value) setNlQuery(e.target.value);
+                      }}
+                      className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-md bg-white text-stone-700"
+                    >
+                      <option value="">검색어 프리셋 (30개)</option>
+                      {(sourcesStatus?.koreanKeywords?.core || []).map((kw) => (
+                        <option key={`nl_core_${kw}`} value={kw}>
+                          [핵심] {kw}
+                        </option>
+                      ))}
+                      {(sourcesStatus?.koreanKeywords?.extended || []).map((kw) => (
+                        <option key={`nl_ext_${kw}`} value={kw}>
+                          [확장] {kw}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={nlQuery}
+                      onChange={(e) => setNlQuery(e.target.value)}
+                      placeholder="국립중앙도서관 테스트 검색어 (예: 청소년지도)"
+                      className="flex-1 min-w-[180px] px-3 py-1.5 text-xs border border-stone-300 rounded-md bg-white focus:outline-none focus:border-[#002968]"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleNlSearchTest}
+                    disabled={nlTesting}
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    {nlTesting ? '검색 테스트 중...' : '국립중앙도서관 실데이터 검색 테스트'}
+                  </button>
+                </div>
+
+                {nlTestResult && (
+                  <div
+                    className={`rounded-md border p-3 text-xs space-y-2 ${
+                      nlTestResult.ok
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                        : nlTestResult.status === 'ready_needs_key'
+                          ? 'bg-amber-50 border-amber-200 text-amber-950'
+                          : 'bg-red-50 border-red-200 text-red-900'
+                    }`}
+                  >
+                    <p className="font-semibold">{nlTestResult.message}</p>
+                    {nlTestResult.papers.length > 0 && (
+                      <ul className="space-y-1.5 pt-1 border-t border-emerald-200/70">
+                        {nlTestResult.papers.slice(0, 5).map((item) => (
+                          <li key={item.sourceId} className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-medium text-stone-900 truncate">{item.title}</p>
+                              <p className="text-[11px] text-stone-600 truncate">
+                                {item.authors.join(', ')} · {item.journalName} ·{' '}
+                                {item.publicationDate || '발행일 미상'} · {item.materialType}
+                              </p>
+                            </div>
+                            <a
+                              href={item.paperUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-semibold text-[#002968] hover:underline whitespace-nowrap shrink-0"
+                            >
+                              소장 확인
                             </a>
                           </li>
                         ))}

@@ -9,7 +9,28 @@ import { GoogleGenAI, Type } from '@google/genai';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = Number(process.env.PORT || 3000);
+function resolveServerPort(): number {
+  const portFlagIdx = process.argv.indexOf('--port');
+  if (portFlagIdx !== -1 && process.argv[portFlagIdx + 1]) {
+    const parsed = Number(process.argv[portFlagIdx + 1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  const eqFlag = process.argv.find((arg) => arg.startsWith('--port='));
+  if (eqFlag) {
+    const parsed = Number(eqFlag.slice('--port='.length));
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  const envPort = Number(process.env.PORT || 0);
+  if (Number.isFinite(envPort) && envPort > 0) {
+    if (process.env.NODE_ENV !== 'production' && envPort === 8080) {
+      return 3000;
+    }
+    return envPort;
+  }
+  return 3000;
+}
+
+const PORT = resolveServerPort();
 const GEMINI_MODEL = 'gemini-4-hydrogen';
 const POLITE_USER_AGENT = 'MJU-YouthGuidance-Archive/1.0 (mailto:schaum@mju.ac.kr)';
 
@@ -154,12 +175,15 @@ function buildAcademicSourcesStatus(): AcademicSourceStatus[] {
       scope: 'domestic',
       envVar: 'NL_API_KEY',
       configured: nlConfigured,
-      status: 'planned',
-      stepLabel: '3단계 예정',
+      status: nlConfigured ? 'connected' : 'ready_needs_key',
+      stepLabel: '3단계 (구현 완료)',
       storagePermission: 'metadata_and_link',
       aiProcessingPermission: 'abstract_or_open_fulltext_only',
-      termsSummary: '학위논문·학술지 서지 조회 (국립중앙도서관 인증키 승인 후 연동 예정).',
-      endpointInfo: 'https://www.nl.go.kr/NL/search/openApi/search.do',
+      termsSummary:
+        '국립중앙도서관 인증키 승인 후 학위논문·잡지/학술지·기사 서지 메타데이터 조회 및 원문 안내 연계.',
+      endpointInfo:
+        process.env.NL_API_ENDPOINT?.trim() ||
+        'https://www.nl.go.kr/NL/search/openApi/search.do',
     },
     {
       id: 'openalex',
@@ -433,6 +457,236 @@ async function searchNanetOpenApi(params: {
     totalCount: parsed.totalCount,
     papers: parsed.items,
     message: `국회도서관 Open API에서 "${cleanQuery}" 검색 결과 ${parsed.items.length}건(전체 ${parsed.totalCount}건)을 조회했습니다.`,
+  };
+}
+
+interface NlPaperPreview {
+  sourceId: string;
+  title: string;
+  authors: string[];
+  journalName: string;
+  publicationDate: string;
+  materialType: string;
+  paperUrl: string;
+  sourceName: string;
+  country: 'KR';
+  region: 'domestic';
+  dataAvailability: 'metadata_only';
+  storagePermission: 'metadata_and_link';
+  aiProcessingPermission: 'abstract_or_open_fulltext_only';
+}
+
+function parseNlJsonResponse(rawJson: unknown): {
+  errorMsg: string;
+  totalCount: number;
+  items: NlPaperPreview[];
+} {
+  const root = (rawJson || {}) as Record<string, unknown>;
+  const errorMsg = String(root.error_msg || root.errMsg || root.message || '');
+  const totalCount = Number(root.total ?? root.totalCount ?? 0) || 0;
+  const rawList = Array.isArray(root.result)
+    ? root.result
+    : Array.isArray(root.items)
+      ? root.items
+      : [];
+
+  const items: NlPaperPreview[] = [];
+  for (const row of rawList as Array<Record<string, unknown>>) {
+    const title = stripTags(String(row.title_info || row.title || ''));
+    if (!title) continue;
+    const controlNo = String(row.control_no || row.id || makeSafePaperId('', '', title));
+    const authorStr = stripTags(String(row.author_info || row.author || ''));
+    const authors = authorStr
+      ? authorStr
+          .split(/[,;/|]/)
+          .map((a) => a.trim())
+          .filter(Boolean)
+          .slice(0, 12)
+      : ['저자 정보 미제공'];
+    const journalName =
+      stripTags(String(row.pub_info || row.publisher || '')) || '국립중앙도서관 소장 자료';
+    const publicationDate = stripTags(String(row.pub_year_info || row.pub_year || '')).slice(0, 20);
+    const materialType =
+      stripTags(String(row.type_name || row.category || row.manage_name || '학술자료')).slice(0, 60);
+    const rawDetail = String(row.detail_link || row.url || '').trim();
+    const detailUrl = rawDetail.startsWith('http')
+      ? rawDetail
+      : rawDetail.startsWith('/')
+        ? `https://www.nl.go.kr${rawDetail}`
+        : `https://www.nl.go.kr/NL/contents/search.do?srchTarget=total&pageNum=1&pageSize=10&kwd=${encodeURIComponent(title)}`;
+
+    items.push({
+      sourceId: controlNo,
+      title: title.slice(0, 280),
+      authors,
+      journalName: journalName.slice(0, 180),
+      publicationDate,
+      materialType,
+      paperUrl: detailUrl.slice(0, 480),
+      sourceName: '국립중앙도서관 Open API',
+      country: 'KR',
+      region: 'domestic',
+      dataAvailability: 'metadata_only',
+      storagePermission: 'metadata_and_link',
+      aiProcessingPermission: 'abstract_or_open_fulltext_only',
+    });
+  }
+
+  return { errorMsg, totalCount, items };
+}
+
+function parseNlXmlResponse(xmlText: string): {
+  errorMsg: string;
+  totalCount: number;
+  items: NlPaperPreview[];
+} {
+  const errorMsg = extractXmlTag(xmlText, ['error_msg', 'errMsg', 'resultMsg']);
+  const totalRaw = extractXmlTag(xmlText, ['total', 'totalCount']);
+  const totalCount = Number.parseInt(totalRaw || '0', 10) || 0;
+  const itemBlocks = xmlText.match(/<(?:item|result)\b[^>]*>[\s\S]*?<\/(?:item|result)>/gi) || [];
+  const items: NlPaperPreview[] = [];
+
+  for (const block of itemBlocks) {
+    const title = extractXmlTag(block, ['title_info', 'title']);
+    if (!title) continue;
+    const controlNo =
+      extractXmlTag(block, ['control_no', 'id']) || makeSafePaperId('', '', title);
+    const authorStr = extractXmlTag(block, ['author_info', 'author']);
+    const authors = authorStr
+      ? authorStr
+          .split(/[,;/|]/)
+          .map((a) => a.trim())
+          .filter(Boolean)
+          .slice(0, 12)
+      : ['저자 정보 미제공'];
+    const journalName =
+      extractXmlTag(block, ['pub_info', 'publisher']) || '국립중앙도서관 소장 자료';
+    const publicationDate = extractXmlTag(block, ['pub_year_info', 'pub_year']).slice(0, 20);
+    const materialType =
+      extractXmlTag(block, ['type_name', 'category', 'manage_name']) || '학술자료';
+    const rawDetail = extractXmlTag(block, ['detail_link', 'url']);
+    const detailUrl = rawDetail.startsWith('http')
+      ? rawDetail
+      : rawDetail.startsWith('/')
+        ? `https://www.nl.go.kr${rawDetail}`
+        : `https://www.nl.go.kr/NL/contents/search.do?srchTarget=total&pageNum=1&pageSize=10&kwd=${encodeURIComponent(title)}`;
+
+    items.push({
+      sourceId: controlNo,
+      title: title.slice(0, 280),
+      authors,
+      journalName: journalName.slice(0, 180),
+      publicationDate,
+      materialType: materialType.slice(0, 60),
+      paperUrl: detailUrl.slice(0, 480),
+      sourceName: '국립중앙도서관 Open API',
+      country: 'KR',
+      region: 'domestic',
+      dataAvailability: 'metadata_only',
+      storagePermission: 'metadata_and_link',
+      aiProcessingPermission: 'abstract_or_open_fulltext_only',
+    });
+  }
+
+  return { errorMsg, totalCount, items };
+}
+
+async function searchNlOpenApi(params: {
+  query: string;
+  category?: string;
+  pageNo?: number;
+  pageSize?: number;
+}) {
+  const apiKey = process.env.NL_API_KEY?.trim();
+  const endpoint =
+    process.env.NL_API_ENDPOINT?.trim() ||
+    'https://www.nl.go.kr/NL/search/openApi/search.do';
+  const cleanQuery = params.query.trim() || '청소년지도';
+  const cleanCategory = (params.category || '').trim();
+  const pageNo = Math.max(1, Number(params.pageNo || 1));
+  const pageSize = Math.min(Math.max(1, Number(params.pageSize || 10)), 30);
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      configured: false,
+      status: 'ready_needs_key' as const,
+      source: 'nl',
+      query: cleanQuery,
+      category: cleanCategory || '전체',
+      endpoint,
+      totalCount: 0,
+      papers: [] as NlPaperPreview[],
+      message:
+        '국립중앙도서관 Open API 인증키(NL_API_KEY)가 아직 설정되지 않아 연결 준비 상태입니다. 국립중앙도서관(nl.go.kr) Open API 인증키 신청·승인 후 AI Studio Settings > Secrets에 NL_API_KEY를 등록하면 즉시 실데이터 검색이 동작합니다.',
+    };
+  }
+
+  const url = new URL(endpoint);
+  url.searchParams.set('key', apiKey);
+  url.searchParams.set('apiType', 'json');
+  url.searchParams.set('pageNum', String(pageNo));
+  url.searchParams.set('pageSize', String(pageSize));
+  url.searchParams.set('kwd', cleanQuery);
+  if (cleanCategory && cleanCategory !== '전체') {
+    url.searchParams.set('category', cleanCategory);
+  }
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
+      'User-Agent': POLITE_USER_AGENT,
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+
+  const rawBody = await res.text();
+  if (!res.ok) {
+    return {
+      ok: false,
+      configured: true,
+      status: 'api_error' as const,
+      source: 'nl',
+      query: cleanQuery,
+      category: cleanCategory || '전체',
+      endpoint,
+      totalCount: 0,
+      papers: [] as NlPaperPreview[],
+      message: `국립중앙도서관 Open API 응답 오류 (HTTP ${res.status}): ${rawBody.slice(0, 180)}`,
+    };
+  }
+
+  const trimmed = rawBody.trim();
+  const parsed = trimmed.startsWith('{')
+    ? parseNlJsonResponse(JSON.parse(trimmed))
+    : parseNlXmlResponse(trimmed);
+
+  if (parsed.errorMsg) {
+    return {
+      ok: false,
+      configured: true,
+      status: 'api_error' as const,
+      source: 'nl',
+      query: cleanQuery,
+      category: cleanCategory || '전체',
+      endpoint,
+      totalCount: 0,
+      papers: [] as NlPaperPreview[],
+      message: `국립중앙도서관 Open API 오류: ${parsed.errorMsg}`,
+    };
+  }
+
+  return {
+    ok: true,
+    configured: true,
+    status: 'connected' as const,
+    source: 'nl',
+    query: cleanQuery,
+    category: cleanCategory || '전체',
+    endpoint,
+    totalCount: parsed.totalCount,
+    papers: parsed.items,
+    message: `국립중앙도서관 Open API에서 "${cleanQuery}"${cleanCategory && cleanCategory !== '전체' ? ` (${cleanCategory})` : ''} 검색 결과 ${parsed.items.length}건(전체 ${parsed.totalCount}건)을 조회했습니다.`,
   };
 }
 
@@ -1664,6 +1918,7 @@ async function startServer() {
       ok: true,
       geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
       nanetConfigured: Boolean(process.env.NANET_API_KEY?.trim()),
+      nlConfigured: Boolean(process.env.NL_API_KEY?.trim()),
       schedule: getKstScheduleInfo(),
       timestamp: new Date().toISOString(),
     });
@@ -1707,6 +1962,37 @@ async function startServer() {
           err instanceof Error
             ? `국회도서관 API 호출 중 네트워크 오류가 발생했습니다: ${err.message}`
             : '국회도서관 API 호출 중 오류가 발생했습니다.',
+      });
+    }
+  });
+
+  app.post('/api/sources/nl/search', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        query?: string;
+        category?: string;
+        pageNo?: number;
+        pageSize?: number;
+      };
+      const result = await searchNlOpenApi({
+        query: typeof body.query === 'string' ? body.query : '청소년지도',
+        category: typeof body.category === 'string' ? body.category : '',
+        pageNo: body.pageNo,
+        pageSize: body.pageSize,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(502).json({
+        ok: false,
+        configured: Boolean(process.env.NL_API_KEY?.trim()),
+        status: 'api_error',
+        source: 'nl',
+        papers: [],
+        totalCount: 0,
+        message:
+          err instanceof Error
+            ? `국립중앙도서관 API 호출 중 네트워크 오류가 발생했습니다: ${err.message}`
+            : '국립중앙도서관 API 호출 중 오류가 발생했습니다.',
       });
     }
   });

@@ -255,21 +255,21 @@ export function YouthResearchTrendsPage({
   return (
     <div className="max-w-5xl mx-auto px-5 sm:px-10 py-8 sm:py-10 space-y-8">
       {/* Page Header */}
-      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-6 border-b border-stone-200">
-        <div>
+      <header className="space-y-4 pb-6 border-b border-stone-200">
+        <div className="min-w-0">
           <p className="text-xs font-medium text-stone-500 mb-1">
             Youth Guidance Research Intelligence · OpenAlex &amp; Crossref
           </p>
           <h1 className="font-serif text-2xl sm:text-3xl font-bold text-stone-900">
             청소년지도 최신 연구동향
           </h1>
-          <p className="text-sm text-stone-600 mt-1.5 max-w-2xl leading-relaxed">
+          <p className="text-sm text-stone-600 mt-1.5 max-w-3xl leading-relaxed">
             OpenAlex·Crossref 학술 데이터베이스에서 최근 12개월 국내외 논문을 자동 수집하고, Gemini
             AI가 6대 청소년지도 분야별로 분류·요약한 연구정보 플랫폼입니다.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <div className="inline-flex items-center p-1 bg-stone-100 rounded-lg">
             <button
               type="button"
@@ -298,7 +298,7 @@ export function YouthResearchTrendsPage({
           </div>
 
           {isAdmin && (
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => handleRunManualSync(3)}
