@@ -16,8 +16,10 @@ import {
   Search,
   Sparkles,
   Tag,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { getActiveApiBaseUrl, isLikelyStaticHosting } from '../lib/apiConfig';
 import {
   buildGoogleScholarCategoryUrl,
   buildGoogleScholarPaperUrl,
@@ -38,6 +40,7 @@ import {
   YOUTH_RESEARCH_CATEGORIES,
   YouthResearchCategory,
 } from '../types/community';
+import { CloudRunServerBar } from './CloudRunServerBar';
 import {
   formatKoreanDateTime,
   NotionCallout,
@@ -84,6 +87,7 @@ export function YouthResearchTrendsPage({
   const [reportScope, setReportScope] = useState<MonthlyReportScope>('all');
   const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
   const [runningLookback, setRunningLookback] = useState<3 | 12 | 60 | null>(null);
+  const [syncProgressText, setSyncProgressText] = useState<string | null>(null);
   const [retryingAnalysis, setRetryingAnalysis] = useState(false);
   const [retryProgress, setRetryProgress] = useState<{ done: number; total: number } | null>(null);
   const [generatingReport, setGeneratingReport] = useState(false);
@@ -295,6 +299,7 @@ export function YouthResearchTrendsPage({
   const handleRunManualSync = async (lookbackMonths: 3 | 12 | 60) => {
     if (!authUser || isSyncRunning) return;
     setRunningLookback(lookbackMonths);
+    setSyncProgressText(`OpenAlex·Crossref 최근 ${lookbackMonths}개월 논문 수집 준비 중...`);
     setActionBanner(null);
     try {
       const result = await collectAndAnalyzePapers({
@@ -307,6 +312,7 @@ export function YouthResearchTrendsPage({
         lookbackMonths,
         perCategoryLimit: lookbackMonths === 3 ? 4 : lookbackMonths === 60 ? 2 : 3,
         generateReportToo: true,
+        onStatusChange: (msg) => setSyncProgressText(msg),
       });
       setActionBanner({
         type: result.ok ? 'ok' : 'err',
@@ -314,6 +320,7 @@ export function YouthResearchTrendsPage({
       });
     } finally {
       setRunningLookback(null);
+      setSyncProgressText(null);
     }
   };
 
@@ -572,15 +579,60 @@ export function YouthResearchTrendsPage({
         </div>
       </header>
 
+      {(isAdmin || viewMode === 'dbpia' || (isLikelyStaticHosting() && !getActiveApiBaseUrl())) && (
+        <CloudRunServerBar compact defaultExpanded={isLikelyStaticHosting() && !getActiveApiBaseUrl()} />
+      )}
+
+      {(isSyncRunning || retryingAnalysis || generatingReport) && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="px-4 py-3 rounded-lg border border-[#D5DFEE] bg-[#F4F7FB] text-xs text-[#002968] flex items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+            <div className="min-w-0">
+              <p className="font-semibold truncate">
+                {retryingAnalysis
+                  ? retryProgress
+                    ? `Cloud Run Gemini AI 논문 분석 처리 중 (${retryProgress.done} / ${retryProgress.total}편)...`
+                    : 'Cloud Run Gemini AI 논문 분석 처리 중...'
+                  : generatingReport
+                    ? 'Cloud Run Gemini AI 월간 연구동향 종합 보고서 작성 중...'
+                    : syncProgressText ||
+                      researchSyncStatus?.lastSyncMessage ||
+                      '논문 수집 및 Gemini AI 분석을 진행하고 있습니다...'}
+              </p>
+              <p className="text-[11px] text-stone-600 mt-0.5">
+                AI 분석이 완료되면 Firestore에 자동 반영되어 화면이 업데이트됩니다.
+              </p>
+            </div>
+          </div>
+          {retryingAnalysis && retryProgress && retryProgress.total > 0 && (
+            <span className="font-mono font-semibold tabular-nums shrink-0">
+              {Math.round((retryProgress.done / retryProgress.total) * 100)}%
+            </span>
+          )}
+        </div>
+      )}
+
       {actionBanner && (
         <div
-          className={`px-4 py-3 rounded-lg border text-xs font-medium ${
+          className={`px-4 py-3 rounded-lg border text-xs font-medium flex items-start justify-between gap-3 ${
             actionBanner.type === 'ok'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
               : 'bg-red-50 border-red-200 text-red-800'
           }`}
         >
-          {actionBanner.text}
+          <span className="leading-relaxed">{actionBanner.text}</span>
+          <button
+            type="button"
+            onClick={() => setActionBanner(null)}
+            aria-label="알림 닫기"
+            className="text-current opacity-70 hover:opacity-100 p-0.5 shrink-0 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 

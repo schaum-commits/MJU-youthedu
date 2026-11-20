@@ -11,6 +11,12 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import {
+  describeApiTarget,
+  formatServerFetchError,
+  getActiveApiBaseUrl,
+  resolveApiUrl,
+} from './apiConfig';
+import {
   LIMITS,
   MonthlyTrendReport,
   PaperRecord,
@@ -113,16 +119,6 @@ export interface YouthSyncRunResult {
 }
 
 let activeYouthSyncPromise: Promise<YouthSyncRunResult> | null = null;
-
-function resolveApiUrl(apiPath: string): string {
-  const configuredBase = (
-    (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-      ?.VITE_API_BASE_URL || ''
-  )
-    .trim()
-    .replace(/\/$/, '');
-  return configuredBase ? `${configuredBase}${apiPath}` : apiPath;
-}
 
 export function isSyncActivelyRunning(status: ResearchSyncStatus | null | undefined): boolean {
   if (!status || status.lastSyncStatus !== 'syncing') return false;
@@ -904,7 +900,7 @@ export async function generateMonthlyTrendReport({
       return {
         ok: false,
         message:
-          '정적 호스팅(GitHub Pages)에서는 AI 보고서 생성 서버를 호출할 수 없습니다. AI Studio 서버 주소(*.run.app)에서 실행해 주세요.',
+          '현재 정적 호스팅(GitHub Pages)에 Cloud Run API 서버 주소가 연결되지 않았습니다. 상단 [Cloud Run 서버 연결 설정]에서 백엔드 URL(https://...run.app)을 입력한 뒤 다시 시도해 주세요.',
       };
     }
 
@@ -994,8 +990,7 @@ export async function generateMonthlyTrendReport({
   } catch (error) {
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : '월간 연구동향 보고서 생성 중 오류가 발생했습니다.',
+      message: formatServerFetchError(error, 'Cloud Run 월간 보고서 AI'),
     };
   }
 }
@@ -1064,6 +1059,7 @@ export async function collectAndAnalyzePapers({
   perCategoryLimit = 3,
   lookbackMonths = 3,
   generateReportToo = true,
+  onStatusChange,
 }: {
   triggerType: 'manual' | 'scheduled_monthly';
   authUser: User;
@@ -1074,6 +1070,7 @@ export async function collectAndAnalyzePapers({
   perCategoryLimit?: number;
   lookbackMonths?: number;
   generateReportToo?: boolean;
+  onStatusChange?: (statusText: string) => void;
 }): Promise<YouthSyncRunResult> {
   if (activeYouthSyncPromise) {
     return activeYouthSyncPromise;
@@ -1222,11 +1219,15 @@ export async function collectAndAnalyzePapers({
       const analysisErrors: string[] = [];
       const analyzedById = new Map<string, AnalyzedPaperPayload>();
 
-      // Step 2: Try Gemini AI analysis on server in safe chunks of 12, preserving collected papers if AI server is unavailable or errored
+      onStatusChange?.(`OpenAlex·Crossref ${lookbackLabel} 국내외 논문 수집 중...`);
+      // Step 2: Try Gemini AI analysis on Cloud Run server in safe chunks of 12, preserving collected papers if AI server is unavailable or errored
       if (newDrafts.length > 0 && !usedStaticCollectionFallback) {
         try {
           for (let offset = 0; offset < newDrafts.length; offset += 12) {
             const chunk = newDrafts.slice(offset, offset + 12);
+            onStatusChange?.(
+              `Cloud Run Gemini AI 논문 분석 중 (${Math.min(offset + chunk.length, newDrafts.length)} / ${newDrafts.length}편)...`
+            );
             const analyzeRes = await fetch(resolveApiUrl('/api/papers/analyze'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -1267,8 +1268,7 @@ export async function collectAndAnalyzePapers({
             analysisErrors.push(...sanitizeStringArray(analyzeJson.stats?.analysisErrors, 25, 240));
           }
         } catch (aiErr) {
-          aiGlobalErrorMessage =
-            aiErr instanceof Error ? aiErr.message : 'AI 분석 서버 연결에 실패했습니다.';
+          aiGlobalErrorMessage = formatServerFetchError(aiErr, 'Cloud Run Gemini AI 분석');
           analysisErrors.push(aiGlobalErrorMessage.slice(0, 240));
         }
       }
@@ -1366,7 +1366,7 @@ export async function collectAndAnalyzePapers({
           paperDoc.analysisError = (ai?.analysisError || aiGlobalErrorMessage).slice(0, 500);
         } else if (aiServerUnavailable) {
           paperDoc.analysisError =
-            '정적 호스팅(GitHub Pages)에서 서지와 초록이 먼저 수집되었습니다. AI Studio 서버 환경(*.run.app)에서 [대기·실패 논문 AI 분석]을 실행하면 AI 요약이 채워집니다.'.slice(
+            '정적 호스팅 환경에서 서지와 초록이 먼저 저장되었습니다. 상단 [Cloud Run 서버 연결 설정]에서 백엔드 주소를 연결한 뒤 [대기·실패 논문 AI 분석]을 실행해 주세요.'.slice(
               0,
               500
             );
@@ -1423,13 +1423,14 @@ export async function collectAndAnalyzePapers({
       if (newDrafts.length === 0) {
         summaryMessage = `최근 ${safeLookback}개월(${stats.fromDate} ~ ${stats.toDate}) OpenAlex·Crossref 논문을 점검했으며, 신규 미등록 논문이 없어 최신 상태입니다.`;
       } else if (aiServerUnavailable) {
-        summaryMessage = `정적 호스팅 환경: OpenAlex·Crossref에서 최근 ${safeLookback}개월 신규 논문 ${newDrafts.length}편(국내 ${domesticCount} · 해외 ${internationalCount})의 서지·초록을 수집해 저장했습니다. AI 요약은 AI Studio 서버(*.run.app)에서 [AI 분석 실행]을 눌러 완료할 수 있습니다.`;
+        summaryMessage = `정적 호스팅 환경(Cloud Run 미연결): 최근 ${safeLookback}개월 신규 논문 ${newDrafts.length}편(국내 ${domesticCount} · 해외 ${internationalCount})의 서지·초록을 먼저 저장했습니다. [Cloud Run 서버 연결 설정] 후 [AI 분석 실행]으로 요약을 완료하세요.`;
       } else if (aiGlobalErrorMessage) {
         summaryMessage = `최근 ${safeLookback}개월 신규 논문 ${newDrafts.length}편(국내 ${domesticCount} · 해외 ${internationalCount})이 저장되었으나 AI 분석이 보류되었습니다: ${aiGlobalErrorMessage}`;
       } else {
         summaryMessage = `최근 ${safeLookback}개월 신규 논문 ${newDrafts.length}편(국내 ${domesticCount} · 해외 ${internationalCount}) 수집 및 AI 분석 완료(${analyzedSuccessCount}성공 / ${analyzedFailedCount}실패).`;
       }
 
+      onStatusChange?.('수집 결과 및 실행 로그를 Firestore에 저장하는 중...');
       statusBatch.set(statusRef, {
         autoEnabled,
         intervalDays: MONTHLY_INTERVAL_DAYS,
@@ -1457,6 +1458,7 @@ export async function collectAndAnalyzePapers({
         savedRecordsForReport.length > 0 &&
         newDrafts.length > 0
       ) {
+        onStatusChange?.('Cloud Run Gemini AI 월간 연구동향 보고서 생성 중...');
         await generateMonthlyTrendReport({
           papers: savedRecordsForReport,
           newPapersCount: newDrafts.length,
@@ -1617,7 +1619,7 @@ export async function retryFailedPapers({
       if (!contentType.includes('application/json')) {
         staticHostingError = true;
         fatalMessage =
-          '정적 호스팅(GitHub Pages)에서는 AI 분석 API 서버를 호출할 수 없습니다. AI Studio 서버 주소(*.run.app)에서 실행해 주세요.';
+          '현재 정적 호스팅(GitHub Pages)에 Cloud Run API 서버 주소가 설정되지 않았습니다. 상단 [Cloud Run 서버 연결 설정]에서 백엔드 주소를 등록한 뒤 다시 실행해 주세요.';
         break;
       }
 
@@ -1774,7 +1776,7 @@ export async function retryFailedPapers({
       message: `대기·실패 논문 AI 분석 복구 완료: ${totalSuccess}건 성공, ${totalFailed}건 실패${tailNotice}`,
     };
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : '논문 AI 분석 중 오류가 발생했습니다.';
+    const errMsg = formatServerFetchError(error, 'Cloud Run Gemini AI 분석');
     try {
       const logId = `log_${Date.now()}`;
       await setDoc(doc(db, 'syncLogs', logId), {
@@ -2315,15 +2317,21 @@ export async function runAdminSystemDiagnostics({
 
   // 3. Backend /api/health & Gemini Server Capability Check
   const healthStart = performance.now();
+  const targetServerLabel = describeApiTarget();
   let serverAvailable = false;
   try {
     const res = await fetch(resolveApiUrl('/api/health'));
     const ctype = res.headers.get('content-type') || '';
     if (!res.ok || !ctype.includes('application/json')) {
-      throw new Error('정적 호스팅 또는 API 서버 비활성 상태');
+      throw new Error(
+        `정적 호스팅 또는 API 서버 비활성 상태 (대상: ${targetServerLabel})`
+      );
     }
     const health = (await res.json()) as {
       ok?: boolean;
+      model?: string;
+      environment?: string;
+      corsMode?: string;
       geminiConfigured?: boolean;
       nanetConfigured?: boolean;
       nlConfigured?: boolean;
@@ -2334,14 +2342,14 @@ export async function runAdminSystemDiagnostics({
     serverAvailable = Boolean(health.ok);
     checks.push({
       id: 'backend_health',
-      label: 'Express API 서버 · Gemini AI 키 구성',
+      label: 'Cloud Run / Express API · Gemini AI 구성',
       category: 'backend',
       status: health.ok && health.geminiConfigured ? 'pass' : health.ok ? 'warn' : 'fail',
       latencyMs: Math.round(performance.now() - healthStart),
       summary: health.geminiConfigured
-        ? 'API 서버 및 GEMINI_API_KEY 준비됨'
-        : 'API 서버 정상 · GEMINI_API_KEY 미설정',
-      detail: `서버 스케줄 ${health.schedule?.cron || '0 3 1 * *'} (${health.schedule?.timezone || 'Asia/Seoul'}) · 다음 실행 ${health.schedule?.nextRunLabel || '-'}`,
+        ? `API 서버 및 GEMINI_API_KEY 준비됨 (${targetServerLabel})`
+        : `API 서버 응답 · GEMINI_API_KEY 미설정 (${targetServerLabel})`,
+      detail: `환경 ${health.environment || 'node'} · CORS ${health.corsMode || 'default'} · 모델 ${health.model || 'gemini-4-hydrogen'} · 스케줄 ${health.schedule?.cron || '0 3 1 * *'} (${health.schedule?.timezone || 'Asia/Seoul'})`,
     });
 
     const configuredOptionalKeys = [
@@ -2364,17 +2372,19 @@ export async function runAdminSystemDiagnostics({
       detail:
         configuredOptionalKeys.length > 0
           ? `등록된 서버 비밀키: ${configuredOptionalKeys.join(', ')}`
-          : '국회도서관(NANET_API_KEY), 국립중앙도서관(NL_API_KEY), DBpia(DBPIA_API_KEY)는 Settings > Secrets 등록 시 즉시 활성화됩니다.',
+          : '국회도서관(NANET_API_KEY), 국립중앙도서관(NL_API_KEY), DBpia(DBPIA_API_KEY)는 서버 환경변수(Secret Manager) 등록 시 즉시 활성화됩니다.',
     });
   } catch (err) {
     checks.push({
       id: 'backend_health',
-      label: 'Express API 서버 · Gemini AI 키 구성',
+      label: 'Cloud Run / Express API · Gemini AI 구성',
       category: 'backend',
-      status: 'warn',
+      status: getActiveApiBaseUrl() ? 'fail' : 'warn',
       latencyMs: Math.round(performance.now() - healthStart),
-      summary: '정적 호스팅 또는 백엔드 미연결',
-      detail: err instanceof Error ? err.message : 'AI Studio 서버 환경에서 확인하세요.',
+      summary: getActiveApiBaseUrl()
+        ? `Cloud Run 서버 연결/CORS 실패 (${targetServerLabel})`
+        : '정적 호스팅 또는 백엔드 미연결',
+      detail: formatServerFetchError(err, 'Cloud Run API'),
     });
   }
 

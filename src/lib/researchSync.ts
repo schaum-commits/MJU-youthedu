@@ -7,6 +7,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
+import { formatServerFetchError, resolveApiUrl } from './apiConfig';
 import {
   LIMITS,
   ResearchSyncMode,
@@ -66,7 +67,7 @@ export function getGoogleScholarSearchUrl(title: string): string {
 
 export async function checkResearchServerAvailable(): Promise<boolean> {
   try {
-    const res = await fetch('/api/health', {
+    const res = await fetch(resolveApiUrl('/api/health'), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -174,7 +175,7 @@ export async function runResearchSync({
     }
 
     try {
-      const response = await fetch('/api/research/sync', {
+      const response = await fetch(resolveApiUrl('/api/research/sync'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -187,7 +188,7 @@ export async function runResearchSync({
       const contentType = response.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         const staticMessage =
-          '현재 정적 호스팅 환경에서는 구글 학술검색 AI 수집 API 서버를 실행할 수 없습니다. AI Studio 서버 환경에서 실행하거나 자동 동기화된 DB 내역을 확인해 주세요.';
+          '현재 정적 호스팅 환경에서는 Cloud Run AI 수집 API 서버를 호출할 수 없습니다. 상단 [Cloud Run 서버 연결 설정]에서 백엔드 주소를 등록한 뒤 다시 실행해 주세요.';
         await setDoc(statusRef, {
           autoEnabled,
           intervalDays: RESEARCH_SYNC_INTERVAL_DAYS,
@@ -302,8 +303,7 @@ export async function runResearchSync({
         message: successMessage,
       };
     } catch (error) {
-      const errMessage =
-        error instanceof Error ? error.message : '구글 학술검색 연구 동향 동기화에 실패했습니다.';
+      const errMessage = formatServerFetchError(error, 'Cloud Run 연구동향 동기화');
       try {
         await setDoc(statusRef, {
           autoEnabled,

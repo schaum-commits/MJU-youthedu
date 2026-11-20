@@ -1462,7 +1462,7 @@ function mapGeminiErrorMessage(err: unknown): { status: number; message: string 
     return {
       status: 500,
       message:
-        'GEMINI_API_KEY가 설정되지 않았습니다. Settings > Secrets 패널에서 Gemini API 키를 확인해 주세요.',
+        'GEMINI_API_KEY가 설정되지 않았습니다. Cloud Run 환경변수(Secret Manager) 또는 Settings > Secrets에 Gemini API 키를 등록해 주세요.',
     };
   }
   if (
@@ -1474,7 +1474,7 @@ function mapGeminiErrorMessage(err: unknown): { status: number; message: string 
     return {
       status: 502,
       message:
-        'Gemini API 키가 유효하지 않거나 권한이 없습니다. Settings > Secrets 패널에서 API 키 상태를 확인해 주세요.',
+        'Gemini API 키가 유효하지 않거나 권한이 없습니다. Cloud Run 환경변수(Secret Manager) 또는 Secrets의 API 키 상태를 확인해 주세요.',
     };
   }
   if (raw.includes('RESOURCE_EXHAUSTED') || raw.includes('"code":429')) {
@@ -3057,24 +3057,164 @@ async function handleLegacyResearchSync(req: Request, res: Response) {
   }
 }
 
+function parseAllowedOrigins(): string[] {
+  const raw = process.env.ALLOWED_ORIGINS?.trim() || '';
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((item) => item.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
+
+function isOriginAllowed(origin: string | undefined, allowlist: string[]): boolean {
+  if (!origin) return true;
+  const cleanOrigin = origin.trim().replace(/\/+$/, '');
+
+  if (allowlist.length > 0) {
+    if (allowlist.includes('*')) return true;
+    return allowlist.some((pattern) => {
+      if (pattern === cleanOrigin) return true;
+      if (pattern.startsWith('https://*.')) {
+        const suffix = pattern.slice('https://*'.length); // e.g. ".github.io"
+        return cleanOrigin.startsWith('https://') && cleanOrigin.endsWith(suffix);
+      }
+      return false;
+    });
+  }
+
+  try {
+    const parsed = new URL(cleanOrigin);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      parsed.protocol === 'https:' &&
+      (host.endsWith('.github.io') ||
+        host.endsWith('.run.app') ||
+        host.endsWith('.web.app') ||
+        host.endsWith('.firebaseapp.com'))
+    ) {
+      return true;
+    }
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return true;
+    }
+    const appUrl = process.env.APP_URL?.trim();
+    if (appUrl) {
+      const appOrigin = new URL(appUrl).origin;
+      if (parsed.origin === appOrigin) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function handleTestGeminiAi(_req: Request, res: Response) {
+  const started = Date.now();
+  try {
+    const ai = getGeminiClient();
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: [
+        '다음 연구 주제를 청소년지도학과 관점에서 1문장 한국어 요약과 가장 알맞은 6대 분야 1개로 분류해 JSON으로 응답하세요.',
+        '제목: 디지털 전환 시대 청소년지도사의 AI 리터러시 역량과 청소년 참여활동 활성화 방안',
+      ].join('\n'),
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            sampleCategory: {
+              type: Type.STRING,
+              enum: [...YOUTH_CATEGORIES],
+            },
+            sampleSummary: { type: Type.STRING },
+          },
+          required: ['sampleCategory', 'sampleSummary'],
+        },
+      },
+    });
+
+    const parsed = JSON.parse((response.text ?? '{}').trim()) as {
+      sampleCategory?: string;
+      sampleSummary?: string;
+    };
+
+    res.json({
+      ok: true,
+      model: GEMINI_MODEL,
+      latencyMs: Date.now() - started,
+      sampleCategory: parsed.sampleCategory || YOUTH_CATEGORIES[3],
+      sampleSummary: (parsed.sampleSummary || 'AI 요약 테스트 응답을 정상 수신했습니다.').slice(
+        0,
+        300
+      ),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const mapped = mapGeminiErrorMessage(err);
+    res.status(mapped.status).json({
+      ok: false,
+      model: GEMINI_MODEL,
+      latencyMs: Date.now() - started,
+      error: mapped.message,
+    });
+  }
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
 
+  const corsAllowlist = parseAllowedOrigins();
+
   app.use('/api', (req: Request, res: Response, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const requestOrigin =
+      typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
+    const allowed = isOriginAllowed(requestOrigin, corsAllowlist);
+
+    res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With'
+    );
+    res.setHeader('Access-Control-Max-Age', '86400');
+
+    if (allowed) {
+      res.setHeader('Access-Control-Allow-Origin', requestOrigin || '*');
+    }
+
     if (req.method === 'OPTIONS') {
+      if (!allowed) {
+        res.status(403).json({
+          ok: false,
+          error:
+            '허용되지 않은 도메인(CORS)에서의 API 요청입니다. Cloud Run 환경변수 ALLOWED_ORIGINS를 확인해 주세요.',
+        });
+        return;
+      }
       res.status(204).end();
       return;
     }
+
+    if (!allowed) {
+      res.status(403).json({
+        ok: false,
+        error:
+          '허용되지 않은 도메인(CORS)에서의 API 요청입니다. Cloud Run 환경변수 ALLOWED_ORIGINS를 확인해 주세요.',
+      });
+      return;
+    }
+
     next();
   });
 
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({
       ok: true,
+      model: GEMINI_MODEL,
+      environment: process.env.K_SERVICE ? 'cloud_run' : 'node_server',
+      corsMode: corsAllowlist.length > 0 ? 'custom_allowlist' : 'github_pages_default',
       geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
       nanetConfigured: Boolean(process.env.NANET_API_KEY?.trim()),
       nlConfigured: Boolean(process.env.NL_API_KEY?.trim()),
@@ -3084,6 +3224,8 @@ async function startServer() {
       timestamp: new Date().toISOString(),
     });
   });
+
+  app.post('/api/health/ai-test', handleTestGeminiAi);
 
   app.get('/api/sources/status', (_req: Request, res: Response) => {
     res.json({

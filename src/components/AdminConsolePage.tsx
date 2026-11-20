@@ -76,6 +76,7 @@ import {
   updateMonthlyTrendReportFields,
 } from '../lib/youthPaperSync';
 import { DEFAULT_PUBLIC_SETTINGS, seedInitialWorkspaceData } from '../lib/seedData';
+import { CloudRunServerBar } from './CloudRunServerBar';
 import {
   ACTIVITY_PRESET_IMAGES,
   ActivityCategory,
@@ -141,6 +142,7 @@ export function AdminConsolePage({
   // Youth Research Automation State
   const [syncLogs, setSyncLogs] = useState<ResearchSyncLog[]>([]);
   const [runningYouthLookback, setRunningYouthLookback] = useState<3 | 12 | 60 | null>(null);
+  const [youthSyncProgressText, setYouthSyncProgressText] = useState<string | null>(null);
   const [retryingFailed, setRetryingFailed] = useState(false);
   const [retryYouthProgress, setRetryYouthProgress] = useState<{ done: number; total: number } | null>(
     null
@@ -970,6 +972,7 @@ export function AdminConsolePage({
   const handleYouthManualCollect = async (lookbackMonths: 3 | 12 | 60) => {
     if (!authUser || isYouthSyncActive) return;
     setRunningYouthLookback(lookbackMonths);
+    setYouthSyncProgressText(`OpenAlex·Crossref 최근 ${lookbackMonths}개월 논문 수집 준비 중...`);
     try {
       const res = await collectAndAnalyzePapers({
         triggerType: 'manual',
@@ -981,10 +984,12 @@ export function AdminConsolePage({
         lookbackMonths,
         perCategoryLimit: lookbackMonths === 3 ? 4 : lookbackMonths === 60 ? 2 : 3,
         generateReportToo: true,
+        onStatusChange: (msg) => setYouthSyncProgressText(msg),
       });
       showToast(res.ok ? 'ok' : 'err', res.message);
     } finally {
       setRunningYouthLookback(null);
+      setYouthSyncProgressText(null);
     }
   };
 
@@ -2223,6 +2228,37 @@ export function AdminConsolePage({
       {/* TAB 4: YOUTH RESEARCH TRENDS AI COLLECTION & REPORTS */}
       {subTab === 'research' && (
         <section className="space-y-6">
+          {/* Cloud Run API Server Connection & Live AI Verification */}
+          <CloudRunServerBar compact={false} title="Google Cloud Run AI 서버 연동 설정 및 검증" />
+
+          {(isYouthSyncActive || retryingFailed || generatingMonthlyReport) && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-lg border border-[#D5DFEE] bg-[#F4F7FB] px-4 py-3 text-xs text-[#002968] flex items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                <span className="font-semibold truncate">
+                  {retryingFailed
+                    ? retryYouthProgress
+                      ? `Cloud Run Gemini AI 논문 복구 분석 중 (${retryYouthProgress.done} / ${retryYouthProgress.total}편)...`
+                      : 'Cloud Run Gemini AI 논문 복구 분석 중...'
+                    : generatingMonthlyReport
+                      ? 'Cloud Run Gemini AI 월간 연구동향 종합 보고서 생성 중...'
+                      : youthSyncProgressText ||
+                        researchSyncStatus?.lastSyncMessage ||
+                        '논문 수집 및 Gemini AI 분석을 진행 중입니다...'}
+                </span>
+              </div>
+              {retryingFailed && retryYouthProgress && retryYouthProgress.total > 0 && (
+                <span className="font-mono font-semibold tabular-nums shrink-0">
+                  {Math.round((retryYouthProgress.done / retryYouthProgress.total) * 100)}%
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Status & Schedule Control Card */}
           <div className="rounded-xl border border-[#D5DFEE] bg-[#F4F7FB] p-5 space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
