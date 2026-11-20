@@ -7,7 +7,6 @@ import React, { Component, useEffect, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from './lib/firebase';
-import { checkResearchServerAvailable } from './lib/researchSync';
 import {
   collectAndAnalyzePapers,
   isMonthlySyncDue,
@@ -17,7 +16,6 @@ import {
   CommunityLinks,
   CouncilActivity,
   DEFAULT_KAKAO_CHAT_URL,
-  MonthlyTrendReport,
   PageTab,
   PaperRecord,
   PublicSettings,
@@ -97,7 +95,6 @@ function WorkspaceShell() {
   const [researchSyncLoaded, setResearchSyncLoaded] = useState(false);
   const [papers, setPapers] = useState<PaperRecord[]>([]);
   const [papersLoaded, setPapersLoaded] = useState(false);
-  const [monthlyReports, setMonthlyReports] = useState<MonthlyTrendReport[]>([]);
   const monthlyAutoAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -217,23 +214,8 @@ function WorkspaceShell() {
       (error) => handleFirestoreError(error, OperationType.LIST, 'papers')
     );
 
-    const reportsQuery = isAdmin
-      ? query(collection(db, 'monthlyReports'))
-      : query(collection(db, 'monthlyReports'), where('isPublished', '==', true));
-
-    const unsubReports = onSnapshot(
-      reportsQuery,
-      (snap) => {
-        const list = snap.docs.map((d) => d.data() as MonthlyTrendReport);
-        list.sort((a, b) => (b.reportId || '').localeCompare(a.reportId || ''));
-        setMonthlyReports(list);
-      },
-      (error) => handleFirestoreError(error, OperationType.LIST, 'monthlyReports')
-    );
-
     return () => {
       unsubPapers();
-      unsubReports();
     };
   }, [authReady, isAdmin]);
 
@@ -256,9 +238,6 @@ function WorkspaceShell() {
     monthlyAutoAttemptedRef.current = true;
 
     void (async () => {
-      const serverAvailable = await checkResearchServerAvailable();
-      if (!serverAvailable) return;
-
       await collectAndAnalyzePapers({
         triggerType: 'scheduled_monthly',
         authUser,
@@ -268,7 +247,6 @@ function WorkspaceShell() {
         currentStatus: researchSyncStatus,
         lookbackMonths: papers.length === 0 ? 12 : 3,
         perCategoryLimit: 3,
-        generateReportToo: true,
       });
     })();
   }, [
@@ -350,7 +328,6 @@ function WorkspaceShell() {
           {activeTab === 'youthTrends' && (
             <YouthResearchTrendsPage
               papers={papers}
-              monthlyReports={monthlyReports}
               researchSyncStatus={researchSyncStatus}
               onNavigate={setActiveTab}
             />
@@ -376,7 +353,6 @@ function WorkspaceShell() {
               activities={activities}
               researchSyncStatus={researchSyncStatus}
               papers={papers}
-              monthlyReports={monthlyReports}
             />
           )}
         </main>

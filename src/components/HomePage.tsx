@@ -265,7 +265,7 @@ export function HomePage({
                 <ArrowRight className="w-4 h-4 text-stone-400 group-hover:translate-x-0.5 transition-transform" />
               </div>
               <p className="text-xs text-stone-600 leading-relaxed">
-                국내외 학술 데이터베이스에서 수집한 청소년지도 최신 논문과 Gemini AI 분석 요약을 확인합니다.
+                OpenAlex·Crossref 6대 분야 논문 수집과 원문 초록, 키워드, 실시간 DBpia 국내 검색을 제공합니다.
               </p>
             </button>
 
@@ -297,12 +297,12 @@ export function HomePage({
               <div className="flex items-center justify-between mb-1.5">
                 <span className="inline-flex items-center gap-2 text-sm font-semibold text-[#002968]">
                   <Sparkles className="w-4 h-4 text-[#002968]" />
-                  청소년지도 최신 연구동향 (OpenAlex · Crossref · AI 분석)
+                  청소년지도 최신 연구동향 (OpenAlex · Crossref · DBpia 검색)
                 </span>
                 <ArrowRight className="w-4 h-4 text-[#002968] group-hover:translate-x-0.5 transition-transform" />
               </div>
               <p className="text-xs text-stone-700 leading-relaxed">
-                최근 12개월 국내외 학술논문 자동 수집, 6대 분야 분류 및 초록 기반 Gemini AI 연구 요약·월간 동향 보고서를 누구나 열람할 수 있습니다.
+                OpenAlex·Crossref 6대 분야 국내외 논문 자동 수집, 원문 초록·키워드·인용 복사·DOI/Google Scholar 링크 및 실시간 DBpia 국내 검색을 누구나 열람할 수 있습니다.
               </p>
             </button>
           </div>
