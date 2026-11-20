@@ -118,6 +118,188 @@ const EXTENDED_KOREAN_KEYWORDS = [
   '청소년지도사 역량',
 ] as const;
 
+const OVERSEAS_ENGLISH_KEYWORDS = [
+  'Youth Work',
+  'Youth Development',
+  'Youth Participation',
+  'Youth Leadership',
+  'Youth Empowerment',
+  'Career Development',
+  'Youth Education',
+  'Digital Citizenship',
+] as const;
+
+// 30 Korean keywords (20 core + 10 extended) grouped by the 6 YouthResearchCategory domains
+const KOREAN_KEYWORD_GROUPS: Array<{
+  category: YouthResearchCategory;
+  keywords: string[];
+  enMatchTerms: string[];
+}> = [
+  {
+    category: '청소년지도 및 청소년 활동',
+    keywords: [
+      '청소년지도',
+      '청소년지도자',
+      '청소년활동',
+      '청소년수련활동',
+      '청소년시설',
+      '청소년정책',
+      '청소년지도 전문성',
+      '청소년 기관 운영',
+      '청소년 정책 평가',
+      '청소년지도사 역량',
+    ],
+    enMatchTerms: [
+      'youth work',
+      'youth worker',
+      'youth guidance',
+      'youth facility',
+      'youth center',
+      'youth policy',
+      'youth activity',
+      'training',
+      'competency',
+    ],
+  },
+  {
+    category: '청소년 진로 및 리더십',
+    keywords: [
+      '청소년 역량',
+      '청소년 진로',
+      '청소년 리더십',
+      '청소년 진로개발',
+      '청소년 리더십 교육',
+    ],
+    enMatchTerms: [
+      'career',
+      'leadership',
+      'competency',
+      'self-directed',
+      'empowerment',
+      'self-efficacy',
+    ],
+  },
+  {
+    category: '청소년 참여 및 사회적 성장',
+    keywords: [
+      '청소년 참여',
+      '청소년 자치활동',
+      '청소년 시민성',
+      '청소년 성장',
+      '청소년 사회참여',
+    ],
+    enMatchTerms: [
+      'participation',
+      'civic',
+      'citizenship',
+      'autonomy',
+      'community',
+      'human rights',
+      'social growth',
+    ],
+  },
+  {
+    category: 'AI 및 디지털 시대의 청소년',
+    keywords: ['AI와 청소년', '디지털 청소년활동', '미디어 리터러시'],
+    enMatchTerms: [
+      'ai',
+      'artificial intelligence',
+      'digital',
+      'media',
+      'smartphone',
+      'online',
+      'literacy',
+      'cyber',
+    ],
+  },
+  {
+    category: '청소년 교육 및 평생학습',
+    keywords: [
+      '청소년 프로그램',
+      '청소년 교육',
+      '청소년 활동 효과',
+      '청소년 활동 프로그램 개발',
+    ],
+    enMatchTerms: [
+      'program',
+      'education',
+      'learning',
+      'curriculum',
+      'effectiveness',
+      'experiential',
+      'development',
+    ],
+  },
+  {
+    category: '청소년 문제 및 사회 변화',
+    keywords: ['청소년 복지', '학교 밖 청소년', '청소년 문화'],
+    enMatchTerms: [
+      'welfare',
+      'out-of-school',
+      'dropout',
+      'culture',
+      'depression',
+      'anxiety',
+      'isolation',
+      'multicultural',
+      'family',
+      'juvenile',
+    ],
+  },
+];
+
+// Domestic Korean Youth Studies Journals indexed in Crossref / OpenAlex
+const KOREAN_YOUTH_JOURNALS: Array<{
+  nameKo: string;
+  nameEn: string;
+  publisherEn: string;
+  issn: string;
+  doiPrefix: string;
+}> = [
+  {
+    nameKo: '청소년학연구',
+    nameEn: 'Korean Journal of Youth Studies',
+    publisherEn: 'Korea Youth Research Association',
+    issn: '1229-6988',
+    doiPrefix: '10.21509',
+  },
+  {
+    nameKo: '한국청소년연구',
+    nameEn: 'Studies on Korean Youth',
+    publisherEn: 'National Youth Policy Institute',
+    issn: '1225-6366',
+    doiPrefix: '10.14816',
+  },
+  {
+    nameKo: '청소년복지연구',
+    nameEn: 'Journal of Adolescent Welfare',
+    publisherEn: 'Korean Association of Youth Welfare',
+    issn: '1229-4705',
+    doiPrefix: '10.19034',
+  },
+  {
+    nameKo: '청소년문화포럼',
+    nameEn: 'Forum For Youth Culture',
+    publisherEn: 'The Research Center for Korea Youth Culture',
+    issn: '1975-2733',
+    doiPrefix: '10.17854',
+  },
+  {
+    nameKo: '청소년시설환경',
+    nameEn: 'Youth Facility and Environment',
+    publisherEn: 'Korea Institute of Youth Facility and Environment',
+    issn: '1738-0170',
+    doiPrefix: '10.55063',
+  },
+  {
+    nameKo: '미래청소년학회지',
+    nameEn: 'Future Oriented Youth Society',
+    publisherEn: 'Future Oriented Youth Society',
+    issn: '1738-4753',
+    doiPrefix: '10.34244',
+  },
+];
+
 interface AcademicSourceStatus {
   id: 'nanet' | 'nl' | 'dbpia' | 'openalex' | 'crossref';
   name: string;
@@ -190,12 +372,14 @@ function buildAcademicSourcesStatus(): AcademicSourceStatus[] {
       name: 'OpenAlex API',
       scope: 'international',
       envVar: 'OPENALEX_API_KEY',
-      configured: true,
+      configured: Boolean(process.env.OPENALEX_API_KEY?.trim()),
       status: 'connected',
-      stepLabel: '연동 중',
+      stepLabel: '4단계 (고도화 완료)',
       storagePermission: 'open_metadata_and_abstract',
       aiProcessingPermission: 'allowed_open_abstract',
-      termsSummary: 'CC0 공개 메타데이터·초록(inverted index) 저장 및 AI 분석 허용.',
+      termsSummary: process.env.OPENALEX_API_KEY?.trim()
+        ? 'CC0 공개 메타데이터·초록 저장 및 AI 분석 허용 (OPENALEX_API_KEY 적용됨).'
+        : 'CC0 공개 메타데이터·초록 저장 및 AI 분석 허용. (무료 OPENALEX_API_KEY 미설정 시 공용 IP 할당량 429 제한이 발생할 수 있어 Crossref와 병행 동작)',
       endpointInfo: 'https://api.openalex.org/works',
     },
     {
@@ -204,25 +388,28 @@ function buildAcademicSourcesStatus(): AcademicSourceStatus[] {
       scope: 'international',
       configured: true,
       status: 'connected',
-      stepLabel: '연동 중',
+      stepLabel: '4단계 (고도화 완료)',
       storagePermission: 'open_metadata_and_abstract',
       aiProcessingPermission: 'allowed_open_abstract',
-      termsSummary: 'DOI·학술지·발행일 서지정보 보완 및 공개 메타데이터 활용 허용.',
+      termsSummary:
+        '무인증키 실시간 검색·DOI 보완 허용. 국내 6대 청소년학 학술지(ISSN/DOI 접두사) 및 해외 8대 키워드 직접 수집 연동.',
       endpointInfo: 'https://api.crossref.org/works',
     },
     {
       id: 'dbpia',
-      name: 'DBpia Open API',
+      name: 'DBpia Open API (실시간 검색 · 원문 링크 전용)',
       scope: 'domestic',
       envVar: 'DBPIA_API_KEY',
       configured: dbpiaConfigured,
-      status: 'planned',
-      stepLabel: '5단계 예정',
+      status: dbpiaConfigured ? 'connected' : 'ready_needs_key',
+      stepLabel: '5단계 (구현 완료)',
       storagePermission: 'search_only_link',
       aiProcessingPermission: 'prohibited_without_license',
       termsSummary:
-        '약관상 대량·주기적 영구 저장 및 무단 전재 금지(원문 미제공). 실시간 검색 및 DBpia 랜딩 연결 전용.',
-      endpointInfo: 'https://api.dbpia.co.kr/v2/search/search.xml',
+        '약관상 대량·주기적 영구 저장, DB 축적 및 AI 학습·요약 금지(원문 미제공). 실시간 검색 결과 조회 및 DBpia 원문 랜딩 연결 전용.',
+      endpointInfo:
+        process.env.DBPIA_API_ENDPOINT?.trim() ||
+        'https://api.dbpia.co.kr/v2/search/search.xml',
     },
   ];
 }
@@ -690,6 +877,222 @@ async function searchNlOpenApi(params: {
   };
 }
 
+interface DbpiaPaperPreview {
+  sourceId: string;
+  title: string;
+  authors: string[];
+  journalName: string;
+  publisherName: string;
+  publicationDate: string;
+  pages: string;
+  freeYn: 'Y' | 'N';
+  paperUrl: string;
+  sourceName: string;
+  country: 'KR';
+  region: 'domestic';
+  dataAvailability: 'metadata_and_link_only';
+  storagePermission: 'search_only_link';
+  aiProcessingPermission: 'prohibited_without_license';
+}
+
+function cleanDbpiaText(raw: string): string {
+  return decodeHtmlEntities(
+    raw
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+      .replace(/<!HS>|<!HE>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatDbpiaYymm(yymmRaw: string): string {
+  const digits = yymmRaw.replace(/\D/g, '');
+  if (digits.length >= 6) {
+    return `${digits.slice(0, 4)}.${digits.slice(4, 6)}`;
+  }
+  if (digits.length === 4) {
+    return digits;
+  }
+  return yymmRaw.trim();
+}
+
+function parseDbpiaXmlResponse(xmlText: string): {
+  errorCode: string;
+  errorMsg: string;
+  totalCount: number;
+  items: DbpiaPaperPreview[];
+} {
+  const errorCode = extractXmlTag(xmlText, ['Code', 'errorCode', 'errCd']);
+  const errorMsg = extractXmlTag(xmlText, ['Message', 'errorMsg', 'errMsg']);
+  const totalRaw = extractXmlTag(xmlText, ['totalcount', 'totalCount', 'total']);
+  const totalCount = Number.parseInt(totalRaw || '0', 10) || 0;
+
+  const itemBlocks = xmlText.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
+  const items: DbpiaPaperPreview[] = [];
+
+  for (const block of itemBlocks) {
+    // Title is top-level inside <item>; extract before nested blocks if possible
+    const titleMatch = block.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+    const title = cleanDbpiaText(titleMatch?.[1] || '');
+    if (!title) continue;
+
+    // Extract authors from <authors><author><name>...</name></author></authors>
+    const authorsBlock = block.match(/<authors\b[^>]*>([\s\S]*?)<\/authors>/i)?.[1] || '';
+    const authorMatches = Array.from(authorsBlock.matchAll(/<name\b[^>]*>([\s\S]*?)<\/name>/gi))
+      .map((m) => cleanDbpiaText(m[1] || ''))
+      .filter(Boolean);
+    const authors =
+      authorMatches.length > 0 ? authorMatches.slice(0, 12) : ['저자 정보 미제공'];
+
+    // Extract journal name from <publication><name>...</name></publication>
+    const pubBlock = block.match(/<publication\b[^>]*>([\s\S]*?)<\/publication>/i)?.[1] || '';
+    const journalName =
+      cleanDbpiaText(pubBlock.match(/<name\b[^>]*>([\s\S]*?)<\/name>/i)?.[1] || '') ||
+      'DBpia 수록 학술지';
+
+    // Extract publisher/society from <publisher><name>...</name></publisher>
+    const publisherBlock = block.match(/<publisher\b[^>]*>([\s\S]*?)<\/publisher>/i)?.[1] || '';
+    const publisherName = cleanDbpiaText(
+      publisherBlock.match(/<name\b[^>]*>([\s\S]*?)<\/name>/i)?.[1] || ''
+    );
+
+    // Extract issue <yymm>
+    const issueBlock = block.match(/<issue\b[^>]*>([\s\S]*?)<\/issue>/i)?.[1] || '';
+    const yymmRaw = cleanDbpiaText(
+      issueBlock.match(/<yymm\b[^>]*>([\s\S]*?)<\/yymm>/i)?.[1] || ''
+    );
+    const publicationDate = formatDbpiaYymm(yymmRaw).slice(0, 20);
+
+    const pages = cleanDbpiaText(block.match(/<pages\b[^>]*>([\s\S]*?)<\/pages>/i)?.[1] || '');
+    const freeRaw = cleanDbpiaText(
+      block.match(/<free_yn\b[^>]*>([\s\S]*?)<\/free_yn>/i)?.[1] || ''
+    ).toUpperCase();
+    const freeYn: 'Y' | 'N' = freeRaw === 'Y' ? 'Y' : 'N';
+
+    const linkUrlRaw = cleanDbpiaText(
+      block.match(/<link_url\b[^>]*>([\s\S]*?)<\/link_url>/i)?.[1] || ''
+    );
+    const nodeIdMatch = linkUrlRaw.match(/nodeId=([A-Za-z0-9_-]+)/i);
+    const sourceId = nodeIdMatch?.[1] || makeSafePaperId('', linkUrlRaw, title);
+    const paperUrl = linkUrlRaw.startsWith('http')
+      ? linkUrlRaw
+      : `https://www.dbpia.co.kr/search/topSearch?searchOption=all&query=${encodeURIComponent(title)}`;
+
+    items.push({
+      sourceId,
+      title: title.slice(0, 280),
+      authors,
+      journalName: journalName.slice(0, 180),
+      publisherName: publisherName.slice(0, 140),
+      publicationDate,
+      pages: pages.slice(0, 40),
+      freeYn,
+      paperUrl: paperUrl.slice(0, 480),
+      sourceName: 'DBpia Open API (실시간 조회 · 미저장)',
+      country: 'KR',
+      region: 'domestic',
+      dataAvailability: 'metadata_and_link_only',
+      storagePermission: 'search_only_link',
+      aiProcessingPermission: 'prohibited_without_license',
+    });
+  }
+
+  return { errorCode, errorMsg, totalCount, items };
+}
+
+async function searchDbpiaOpenApi(params: {
+  query: string;
+  sortType?: '1' | '2';
+  pageNo?: number;
+  pageCount?: number;
+}) {
+  const apiKey = process.env.DBPIA_API_KEY?.trim();
+  const endpoint =
+    process.env.DBPIA_API_ENDPOINT?.trim() || 'https://api.dbpia.co.kr/v2/search/search.xml';
+  const cleanQuery = params.query.trim() || '청소년지도';
+  const sortType = params.sortType === '1' ? '1' : '2'; // 2: 최신 발행순, 1: 정확도순
+  const pageNo = Math.max(1, Number(params.pageNo || 1));
+  const pageCount = Math.min(Math.max(1, Number(params.pageCount || 10)), 30);
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      configured: false,
+      status: 'ready_needs_key' as const,
+      source: 'dbpia',
+      query: cleanQuery,
+      sortType,
+      endpoint,
+      totalCount: 0,
+      papers: [] as DbpiaPaperPreview[],
+      message:
+        'DBpia Open API 인증키(DBPIA_API_KEY)가 아직 설정되지 않아 연결 준비 상태입니다. DBpia API 이용 신청·승인 후 AI Studio Settings > Secrets에 DBPIA_API_KEY를 등록하면 실시간 검색 및 원문 링크 연결이 동작합니다. (약관 준수: 검색 결과 미저장)',
+    };
+  }
+
+  const url = new URL(endpoint);
+  url.searchParams.set('key', apiKey);
+  url.searchParams.set('target', 'se');
+  url.searchParams.set('searchall', cleanQuery);
+  url.searchParams.set('pagenumber', String(pageNo));
+  url.searchParams.set('pagecount', String(pageCount));
+  url.searchParams.set('sorttype', sortType);
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Accept: 'application/xml, text/xml;q=0.9, */*;q=0.8',
+      'User-Agent': POLITE_USER_AGENT,
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+
+  const rawBody = await res.text();
+  if (!res.ok) {
+    return {
+      ok: false,
+      configured: true,
+      status: 'api_error' as const,
+      source: 'dbpia',
+      query: cleanQuery,
+      sortType,
+      endpoint,
+      totalCount: 0,
+      papers: [] as DbpiaPaperPreview[],
+      message: `DBpia Open API 응답 오류 (HTTP ${res.status}): ${rawBody.slice(0, 180)}`,
+    };
+  }
+
+  const parsed = parseDbpiaXmlResponse(rawBody);
+  if (parsed.errorCode || parsed.errorMsg) {
+    return {
+      ok: false,
+      configured: true,
+      status: 'api_error' as const,
+      source: 'dbpia',
+      query: cleanQuery,
+      sortType,
+      endpoint,
+      totalCount: 0,
+      papers: [] as DbpiaPaperPreview[],
+      message: `DBpia Open API 오류 (${parsed.errorCode || 'ERR'}): ${parsed.errorMsg || '인증키 또는 요청 파라미터를 확인해 주세요.'}`,
+    };
+  }
+
+  return {
+    ok: true,
+    configured: true,
+    status: 'connected' as const,
+    source: 'dbpia',
+    query: cleanQuery,
+    sortType,
+    endpoint,
+    totalCount: parsed.totalCount,
+    papers: parsed.items,
+    message: `DBpia Open API 실시간 검색("${cleanQuery}") 결과 ${parsed.items.length}건(전체 ${parsed.totalCount}건)을 조회했습니다. (약관 준수: 영구 저장 및 AI 요약 미수행)`,
+  };
+}
+
 const LEGACY_CATEGORIES = [
   '청소년정책·제도',
   '상담·심리지원',
@@ -828,31 +1231,114 @@ function reconstructInvertedAbstract(index?: Record<string, number[]> | null): s
   return words.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-function detectDomesticPaper(params: {
+function classifyPaperRegion(params: {
   language?: string;
   title?: string;
   journalName?: string;
+  publisher?: string;
   abstract?: string;
+  doi?: string;
+  issns?: string[];
   countryCodes?: string[];
-}): boolean {
-  const hasHangul = /[가-힣]/.test(
-    `${params.title || ''} ${params.journalName || ''} ${params.abstract || ''}`
-  );
-  if (params.language === 'ko' || hasHangul) return true;
-  if (params.countryCodes?.some((c) => c.toUpperCase() === 'KR')) return true;
-  const journalLower = (params.journalName || '').toLowerCase();
-  if (
-    journalLower.includes('korean') ||
-    journalLower.includes('korea') ||
-    journalLower.includes('청소년')
-  ) {
-    return true;
+  institutions?: string[];
+}): { region: 'domestic' | 'international'; country: string; reason: string } {
+  const titleStr = params.title || '';
+  const journalStr = params.journalName || '';
+  const publisherStr = params.publisher || '';
+  const abstractStr = params.abstract || '';
+  const instStr = (params.institutions || []).join(' ');
+  const doiLower = normalizeDoi(params.doi);
+  const issnSet = new Set((params.issns || []).map((s) => s.trim().toUpperCase()));
+
+  // 1. Known Korean Youth Studies Journal registry (ISSN / DOI prefix / Journal & Publisher name)
+  const matchedKoreanJournal = KOREAN_YOUTH_JOURNALS.find((j) => {
+    if (doiLower && doiLower.startsWith(`${j.doiPrefix.toLowerCase()}/`)) return true;
+    if (j.issn && issnSet.has(j.issn.toUpperCase())) return true;
+    const jl = journalStr.toLowerCase();
+    const pl = publisherStr.toLowerCase();
+    return (
+      jl.includes(j.nameKo) ||
+      jl.includes(j.nameEn.toLowerCase()) ||
+      (j.publisherEn && pl.includes(j.publisherEn.toLowerCase()))
+    );
+  });
+  if (matchedKoreanJournal) {
+    return {
+      region: 'domestic',
+      country: 'KR',
+      reason: `국내 학술지/발행기관 확인 (${matchedKoreanJournal.nameKo})`,
+    };
   }
-  return false;
+
+  // 2. Journal or Publisher or Institution country code === KR
+  if (params.countryCodes?.some((c) => c.toUpperCase() === 'KR')) {
+    return {
+      region: 'domestic',
+      country: 'KR',
+      reason: '발행기관/소속기관 국가코드(KR) 확인',
+    };
+  }
+
+  // 3. Publisher / Journal / Institution name signals (non-language)
+  const combinedOrgText = `${journalStr} ${publisherStr} ${instStr}`.toLowerCase();
+  const koreanOrgMarkers = [
+    'korean',
+    'korea',
+    'south korea',
+    'seoul',
+    'myongji',
+    'yonsei',
+    'sungkyunkwan',
+    'chung-ang',
+    'kyung hee',
+    'ewha',
+    'pusan',
+    'kyungpook',
+    'chonnam',
+    'hanyang',
+    'kci',
+    'dbpia',
+    'riss',
+    'kiss',
+    'nyci',
+    'kywa',
+    '한국',
+    '대한',
+    '청소년',
+    '명지',
+    '대학교',
+    '학회',
+    '연구원',
+  ];
+  const matchedMarker = koreanOrgMarkers.find((m) => combinedOrgText.includes(m));
+  if (matchedMarker) {
+    return {
+      region: 'domestic',
+      country: 'KR',
+      reason: `학술지·발행기관명 국내 신호(${matchedMarker}) 확인`,
+    };
+  }
+
+  // 4. Language or Hangul content combined with context
+  const hasHangul = /[가-힣]/.test(`${titleStr} ${journalStr} ${publisherStr} ${abstractStr}`);
+  if (params.language === 'ko' || hasHangul) {
+    return {
+      region: 'domestic',
+      country: 'KR',
+      reason: '한국어 논문 및 한글 서지정보 확인',
+    };
+  }
+
+  const firstCountry = params.countryCodes?.find((c) => Boolean(c && c.trim()));
+  return {
+    region: 'international',
+    country: firstCountry ? firstCountry.toUpperCase() : 'INTL',
+    reason: '해외 학술지 및 영문/해외 발행기관 기준 판정',
+  };
 }
 
 function getDateRangeByMonths(months: number) {
-  const safeMonths = Math.min(Math.max(Math.round(months || 12), 1), 24);
+  const safeMonths = Math.min(Math.max(Math.round(months || 12), 1), 60);
   const now = new Date();
   const toDate = now.toISOString().slice(0, 10);
   const from = new Date(now);
@@ -861,8 +1347,8 @@ function getDateRangeByMonths(months: number) {
   return { fromDate, toDate, lookbackMonths: safeMonths };
 }
 
-function getKstScheduleInfo() {
-  const now = new Date();
+function getKstScheduleInfo(nowInput: Date = new Date()) {
+  const now = Number.isNaN(nowInput.getTime()) ? new Date() : nowInput;
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Seoul',
     year: 'numeric',
@@ -877,26 +1363,96 @@ function getKstScheduleInfo() {
   const year = Number(getPart('year'));
   const month = Number(getPart('month'));
   const day = Number(getPart('day'));
-  const hour = Number(getPart('hour'));
+  const hour = Number(getPart('hour')) % 24;
 
   const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
+  const currentMonthLabel = `${year}년 ${String(month).padStart(2, '0')}월`;
+  const isPastScheduledSlotThisMonth = day > 1 || (day === 1 && hour >= 3);
+  const currentMonthSlotLabel = `${year}.${String(month).padStart(2, '0')}.01 03:00 (Asia/Seoul)`;
+
   let nextYear = year;
   let nextMonth = month;
-  if (day > 1 || (day === 1 && hour >= 3)) {
+  if (isPastScheduledSlotThisMonth) {
     nextMonth += 1;
     if (nextMonth > 12) {
       nextMonth = 1;
       nextYear += 1;
     }
   }
+  const nextRunKstIso = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01T03:00:00+09:00`;
   const nextRunKstLabel = `${nextYear}.${String(nextMonth).padStart(2, '0')}.01 03:00 (Asia/Seoul)`;
 
   return {
     cron: '0 3 1 * *',
     timezone: 'Asia/Seoul',
     currentMonthKey,
-    kstNowLabel: `${year}.${String(month).padStart(2, '0')}.${String(day).padStart(2, '0')} ${getPart('hour')}:${getPart('minute')} KST`,
+    currentMonthLabel,
+    kstNowLabel: `${year}.${String(month).padStart(2, '0')}.${String(day).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${getPart('minute')} KST`,
+    isPastScheduledSlotThisMonth,
+    currentMonthSlotLabel,
+    nextRunKstIso,
     nextRunKstLabel,
+  };
+}
+
+function evaluateServerMonthlySchedule({
+  nowInput = new Date(),
+  lastSyncedAtIso,
+  scheduleCron = '0 3 1 * *',
+  autoEnabled = true,
+  papersCount = 0,
+}: {
+  nowInput?: Date;
+  lastSyncedAtIso?: string | null;
+  scheduleCron?: string;
+  autoEnabled?: boolean;
+  papersCount?: number;
+}) {
+  const schedule = getKstScheduleInfo(nowInput);
+  if (!autoEnabled) {
+    return { due: false, reason: '자동 스케줄이 일시 중지되어 있습니다.', schedule };
+  }
+  if (papersCount <= 0) {
+    return {
+      due: true,
+      reason: '수집된 논문이 없어 초기 자동 수집 대상입니다.',
+      schedule,
+    };
+  }
+  if (!lastSyncedAtIso || scheduleCron !== '0 3 1 * *') {
+    return {
+      due: true,
+      reason: '매월 1일 KST 03:00 기준 정기 실행 이력이 없어 자동 수집 대상입니다.',
+      schedule,
+    };
+  }
+  const lastDate = new Date(lastSyncedAtIso);
+  if (Number.isNaN(lastDate.getTime())) {
+    return {
+      due: true,
+      reason: '마지막 실행 시각 형식을 확인할 수 없어 자동 수집 대상입니다.',
+      schedule,
+    };
+  }
+  if (!schedule.isPastScheduledSlotThisMonth) {
+    return {
+      due: false,
+      reason: `이번 달 정기 시각(${schedule.currentMonthSlotLabel}) 도래 전입니다.`,
+      schedule,
+    };
+  }
+  const lastInfo = getKstScheduleInfo(lastDate);
+  if (lastInfo.currentMonthKey < schedule.currentMonthKey) {
+    return {
+      due: true,
+      reason: `이번 달 정기 시각(${schedule.currentMonthSlotLabel}) 이후 미실행 상태이므로 자동 실행됩니다.`,
+      schedule,
+    };
+  }
+  return {
+    due: false,
+    reason: `${schedule.currentMonthLabel} 정기 수집이 이미 완료되었습니다 (${lastInfo.kstNowLabel}).`,
+    schedule,
   };
 }
 
@@ -953,11 +1509,17 @@ interface OpenAlexWork {
   open_access?: { is_oa?: boolean; oa_url?: string | null } | null;
   primary_location?: {
     landing_page_url?: string | null;
-    source?: { display_name?: string | null; country_code?: string | null } | null;
+    source?: {
+      display_name?: string | null;
+      country_code?: string | null;
+      host_organization_name?: string | null;
+      issn?: string[] | null;
+    } | null;
   } | null;
   authorships?: Array<{
     author?: { display_name?: string | null } | null;
     countries?: string[];
+    institutions?: Array<{ display_name?: string | null; country_code?: string | null }>;
   }>;
   keywords?: Array<{ display_name?: string | null }>;
   concepts?: Array<{ display_name?: string | null }>;
@@ -973,6 +1535,7 @@ async function fetchOpenAlexWorks(params: {
     sort: 'publication_date:desc',
     page: String(params.page ?? 1),
     'per-page': String(params.perPage ?? 5),
+    mailto: 'schaum@mju.ac.kr',
   });
   const apiKey = process.env.OPENALEX_API_KEY?.trim();
   if (apiKey) {
@@ -984,6 +1547,10 @@ async function fetchOpenAlexWorks(params: {
     signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    if (res.status === 429 && errBody.includes('daily_budget')) {
+      throw new Error('OPENALEX_DAILY_BUDGET_429');
+    }
     throw new Error(`OpenAlex HTTP ${res.status}`);
   }
   const json = (await res.json()) as { results?: OpenAlexWork[] };
@@ -995,12 +1562,21 @@ interface CrossrefWorkItem {
   URL?: string;
   title?: string[];
   'container-title'?: string[];
-  author?: Array<{ given?: string; family?: string; name?: string }>;
+  publisher?: string;
+  ISSN?: string[];
+  author?: Array<{
+    given?: string;
+    family?: string;
+    name?: string;
+    affiliation?: Array<{ name?: string }>;
+  }>;
   abstract?: string;
   published?: { 'date-parts'?: number[][] };
   'published-online'?: { 'date-parts'?: number[][] };
   'published-print'?: { 'date-parts'?: number[][] };
   language?: string;
+  subject?: string[];
+  'is-referenced-by-count'?: number;
 }
 
 function formatCrossrefDate(item: CrossrefWorkItem): string {
@@ -1008,8 +1584,10 @@ function formatCrossrefDate(item: CrossrefWorkItem): string {
     item.published?.['date-parts']?.[0] ||
     item['published-online']?.['date-parts']?.[0] ||
     item['published-print']?.['date-parts']?.[0];
-  if (!parts || parts.length === 0) return '';
-  const y = String(parts[0]);
+  if (!parts || parts.length === 0 || !parts[0]) return '';
+  const y = Number(parts[0]);
+  const maxYear = new Date().getFullYear() + 1;
+  if (!Number.isFinite(y) || y < 1950 || y > maxYear) return '';
   const m = parts[1] ? String(parts[1]).padStart(2, '0') : '01';
   const d = parts[2] ? String(parts[2]).padStart(2, '0') : '01';
   return `${y}-${m}-${d}`;
@@ -1020,18 +1598,178 @@ async function fetchCrossrefByDoi(doi: string): Promise<CrossrefWorkItem | null>
   if (!cleanDoi) return null;
   try {
     const res = await fetch(
-      `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`,
+      `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}?mailto=schaum@mju.ac.kr`,
       {
         headers: { 'User-Agent': POLITE_USER_AGENT, Accept: 'application/json' },
         signal: AbortSignal.timeout(7000),
       }
     );
     if (!res.ok) return null;
-    const json = (await res.json()) as { message?: CrossrefWorkItem };
+    const text = await res.text();
+    const json = JSON.parse(text) as { message?: CrossrefWorkItem };
     return json.message || null;
   } catch {
     return null;
   }
+}
+
+async function fetchCrossrefWorksByUrl(url: string, retries = 1): Promise<CrossrefWorkItem[]> {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': POLITE_USER_AGENT, Accept: 'application/json' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) {
+        if ((res.status === 429 || res.status >= 500) && attempt < retries) {
+          await new Promise((r) => setTimeout(r, 650));
+          continue;
+        }
+        return [];
+      }
+      const text = await res.text();
+      if (!text.trim().startsWith('{')) return [];
+      const json = JSON.parse(text) as { message?: { items?: CrossrefWorkItem[] } };
+      return Array.isArray(json.message?.items) ? json.message!.items! : [];
+    } catch {
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 650));
+        continue;
+      }
+      return [];
+    }
+  }
+  return [];
+}
+
+async function runInBatches<T, R>(
+  tasks: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  for (let i = 0; i < tasks.length; i += concurrency) {
+    const slice = tasks.slice(i, i + concurrency);
+    const batchOut = await Promise.all(slice.map((item) => worker(item)));
+    results.push(...batchOut);
+  }
+  return results;
+}
+
+function inferYouthCategoryFromText(text: string): YouthResearchCategory {
+  const lower = text.toLowerCase();
+  let bestCategory: YouthResearchCategory = '청소년지도 및 청소년 활동';
+  let bestScore = 0;
+
+  for (const grp of KOREAN_KEYWORD_GROUPS) {
+    let score = 0;
+    for (const kw of grp.keywords) {
+      if (lower.includes(kw.toLowerCase())) score += 3;
+    }
+    for (const en of grp.enMatchTerms) {
+      if (lower.includes(en.toLowerCase())) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestCategory = grp.category;
+    }
+  }
+  return bestCategory;
+}
+
+function isYouthRelevantText(text: string): boolean {
+  const lower = text.toLowerCase();
+  const youthMarkers = [
+    'youth',
+    'adolescent',
+    'teen',
+    'juvenile',
+    'young people',
+    'emerging adult',
+    'student',
+    'career development',
+    'digital citizenship',
+    '청소년',
+    '청년',
+    '아동',
+    '학생',
+  ];
+  return youthMarkers.some((m) => lower.includes(m));
+}
+
+function normalizeCrossrefCandidate(
+  crItem: CrossrefWorkItem,
+  hintCategory?: YouthResearchCategory,
+  fallbackDate?: string
+): CollectedPaperDraft | null {
+  const title = stripTags(String(crItem.title?.[0] || '')).slice(0, 300);
+  if (!title || title.length < 3) return null;
+
+  const doiClean = normalizeDoi(crItem.DOI);
+  const authors = (crItem.author || [])
+    .map((a) => a.name || [a.family, a.given].filter(Boolean).join(' ').trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  if (authors.length === 0) authors.push('저자 정보 확인 중');
+
+  const journalName = stripTags(String(crItem['container-title']?.[0] || crItem.publisher || '학술지 미상')).slice(
+    0,
+    200
+  );
+  const publisher = stripTags(String(crItem.publisher || ''));
+  const publicationDate = (formatCrossrefDate(crItem) || fallbackDate || new Date().toISOString().slice(0, 10)).slice(
+    0,
+    20
+  );
+  const abstract = crItem.abstract ? stripTags(crItem.abstract).slice(0, 8000) : '';
+  const language = (crItem.language || (/[가-힣]/.test(title) ? 'ko' : 'en')).slice(0, 20);
+  const affiliations = (crItem.author || [])
+    .flatMap((a) => (a.affiliation || []).map((af) => af.name || ''))
+    .filter(Boolean);
+
+  const regionInfo = classifyPaperRegion({
+    language,
+    title,
+    journalName,
+    publisher,
+    abstract,
+    doi: doiClean,
+    issns: crItem.ISSN || [],
+    institutions: affiliations,
+  });
+
+  const resolvedHint =
+    hintCategory || inferYouthCategoryFromText(`${title} ${abstract} ${journalName}`);
+
+  const keywords = Array.from(
+    new Set(
+      (crItem.subject || [])
+        .map((s) => stripTags(s))
+        .filter(Boolean)
+    )
+  ).slice(0, 12);
+
+  const paperUrl = (crItem.URL || (doiClean ? `https://doi.org/${doiClean}` : '')).slice(0, 500);
+
+  return {
+    paperId: makeSafePaperId('', doiClean, title),
+    title,
+    authors,
+    journalName,
+    publicationDate,
+    language,
+    region: regionInfo.region,
+    abstract,
+    keywords,
+    doi: doiClean.slice(0, 200),
+    openAlexId: '',
+    crossrefId: doiClean.slice(0, 200),
+    paperUrl,
+    source: 'Crossref',
+    openAccess: false,
+    citedByCount: Number(crItem['is-referenced-by-count'] || 0),
+    hintCategory: resolvedHint,
+  };
 }
 
 async function handleCollectPapers(req: Request, res: Response) {
@@ -1061,113 +1799,151 @@ async function handleCollectPapers(req: Request, res: Response) {
   const { fromDate, toDate, lookbackMonths } = getDateRangeByMonths(
     Number(body.lookbackMonths || 12)
   );
+  const maxFreshLimit = lookbackMonths >= 36 ? 24 : 16;
 
   let openAlexCalls = 0;
   let crossrefCalls = 0;
   const collectionErrors: string[] = [];
 
-  const candidateMap = new Map<string, { work: OpenAlexWork; hintCategory: YouthResearchCategory }>();
+  const oaCandidateMap = new Map<string, { work: OpenAlexWork; hintCategory: YouthResearchCategory }>();
+  const crDirectCandidates: Array<{ item: CrossrefWorkItem; hintCategory: YouthResearchCategory }> = [];
 
-  // 1. Collect per-category international & Korean papers with pagination support
-  for (const cfg of CATEGORY_QUERIES) {
+  // 1. OpenAlex queries: 6 category English queries + all 30 Korean keywords (grouped by 6 categories)
+  let openAlexBudgetExhausted = false;
+  let consecutiveOpenAlexErrors = 0;
+  for (let idx = 0; idx < CATEGORY_QUERIES.length; idx += 1) {
+    if (openAlexBudgetExhausted) break;
+    const cfg = CATEGORY_QUERIES[idx];
+    const koGroup = KOREAN_KEYWORD_GROUPS[idx];
+    const fullKoQuery = koGroup ? koGroup.keywords.join('|') : cfg.koQuery;
+
+    try {
+      openAlexCalls += 1;
+      const koResults = await fetchOpenAlexWorks({
+        filter: `from_publication_date:${fromDate},to_publication_date:${toDate},default.search:${fullKoQuery}`,
+        page: 1,
+        perPage: Math.min(perCategoryLimit + 2, 6),
+      });
+      consecutiveOpenAlexErrors = 0;
+      for (const work of koResults) {
+        if (work.id && !oaCandidateMap.has(work.id)) {
+          oaCandidateMap.set(work.id, { work, hintCategory: cfg.category });
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      consecutiveOpenAlexErrors += 1;
+      if (msg === 'OPENALEX_DAILY_BUDGET_429' || (msg.includes('503') && consecutiveOpenAlexErrors >= 2)) {
+        openAlexBudgetExhausted = true;
+        collectionErrors.push(
+          msg === 'OPENALEX_DAILY_BUDGET_429'
+            ? 'OpenAlex 공용 IP 일일 할당량(429) 도달 — OPENALEX_API_KEY 설정 시 해소되며, Crossref 국내외 직접 수집으로 자동 보완합니다.'
+            : 'OpenAlex 서버 일시 장애(503) 감지 — Crossref 국내외 직접 수집으로 자동 전환합니다.'
+        );
+        break;
+      }
+      collectionErrors.push(`OpenAlex 국문(30개 확장어) 오류(${cfg.category}): ${msg}`);
+    }
+
+    if (openAlexBudgetExhausted) break;
+
     try {
       openAlexCalls += 1;
       const enResults = await fetchOpenAlexWorks({
         filter: `from_publication_date:${fromDate},to_publication_date:${toDate},title_and_abstract.search:${cfg.enQuery}`,
         page: 1,
-        perPage: Math.min(perCategoryLimit + 2, 6),
-      });
-      for (const work of enResults) {
-        if (work.id && !candidateMap.has(work.id)) {
-          candidateMap.set(work.id, { work, hintCategory: cfg.category });
-        }
-      }
-    } catch (err) {
-      collectionErrors.push(
-        `OpenAlex 영문 수집 오류(${cfg.category}): ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-
-    try {
-      openAlexCalls += 1;
-      const koResults = await fetchOpenAlexWorks({
-        filter: `from_publication_date:${fromDate},to_publication_date:${toDate},language:ko,default.search:${cfg.koQuery}`,
-        page: 1,
         perPage: Math.min(perCategoryLimit + 1, 5),
       });
-      for (const work of koResults) {
-        if (work.id && !candidateMap.has(work.id)) {
-          candidateMap.set(work.id, { work, hintCategory: cfg.category });
+      consecutiveOpenAlexErrors = 0;
+      for (const work of enResults) {
+        if (work.id && !oaCandidateMap.has(work.id)) {
+          oaCandidateMap.set(work.id, { work, hintCategory: cfg.category });
         }
       }
     } catch (err) {
-      collectionErrors.push(
-        `OpenAlex 국문 수집 오류(${cfg.category}): ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }
-
-  // 2. If Korean domestic papers are low, expand search terms with broader Korean youth queries (pagination page 1-2)
-  const initialKoCount = Array.from(candidateMap.values()).filter(({ work }) =>
-    detectDomesticPaper({
-      language: work.language || '',
-      title: work.title || work.display_name || '',
-      journalName: work.primary_location?.source?.display_name || '',
-      countryCodes: work.authorships?.flatMap((a) => a.countries || []) || [],
-    })
-  ).length;
-
-  let expandedKoreanSearchUsed = false;
-  if (initialKoCount < 4) {
-    expandedKoreanSearchUsed = true;
-    try {
-      for (let page = 1; page <= 2; page += 1) {
-        openAlexCalls += 1;
-        const broadKo = await fetchOpenAlexWorks({
-          filter: `from_publication_date:${fromDate},to_publication_date:${toDate},language:ko,default.search:청소년|청년|진로|디지털|학교`,
-          page,
-          perPage: 6,
-        });
-        for (const work of broadKo) {
-          if (work.id && !candidateMap.has(work.id)) {
-            candidateMap.set(work.id, {
-              work,
-              hintCategory: '청소년지도 및 청소년 활동',
-            });
-          }
-        }
+      const msg = err instanceof Error ? err.message : String(err);
+      consecutiveOpenAlexErrors += 1;
+      if (msg === 'OPENALEX_DAILY_BUDGET_429' || (msg.includes('503') && consecutiveOpenAlexErrors >= 2)) {
+        openAlexBudgetExhausted = true;
+        collectionErrors.push(
+          msg === 'OPENALEX_DAILY_BUDGET_429'
+            ? 'OpenAlex 공용 IP 일일 할당량(429) 도달 — Crossref REST API로 자동 전환 수집합니다.'
+            : 'OpenAlex 서버 일시 장애(503) 감지 — Crossref REST API로 자동 전환 수집합니다.'
+        );
+        break;
       }
-    } catch (err) {
-      collectionErrors.push(
-        `OpenAlex 국내 논문 확장 검색 오류: ${err instanceof Error ? err.message : String(err)}`
-      );
+      collectionErrors.push(`OpenAlex 영문 수집 오류(${cfg.category}): ${msg}`);
     }
   }
 
-  // 3. Deduplicate and select candidates before Crossref enrichment
-  const freshEntries: Array<{ work: OpenAlexWork; hintCategory: YouthResearchCategory }> = [];
-  for (const entry of candidateMap.values()) {
-    const title = (entry.work.title || entry.work.display_name || '').trim();
-    const oaId = (entry.work.id || '').trim();
-    const doi = normalizeDoi(entry.work.doi);
+  // 2. Crossref direct domestic Korean Youth Studies Journals (6 KCI journals indexed in Crossref)
+  const journalRows = lookbackMonths >= 36 ? 8 : 5;
+  const crJournalResults = await runInBatches(KOREAN_YOUTH_JOURNALS, 3, async (j) => {
+    crossrefCalls += 1;
+    const url =
+      `https://api.crossref.org/prefixes/${j.doiPrefix}/works` +
+      `?filter=${encodeURIComponent(`from-pub-date:${fromDate},until-pub-date:${toDate}`)}` +
+      `&sort=published&order=desc&rows=${journalRows}&mailto=schaum@mju.ac.kr`;
+    const items = await fetchCrossrefWorksByUrl(url);
+    return items.map((item) => ({
+      item,
+      hintCategory: inferYouthCategoryFromText(
+        `${item.title?.[0] || ''} ${item.abstract || ''} ${j.nameEn}`
+      ),
+    }));
+  });
+
+  // 3. Crossref direct overseas 8 keyword queries
+  const overseasPool = [...OVERSEAS_ENGLISH_KEYWORDS];
+  const crOverseasResults = await runInBatches(overseasPool, 4, async (kw) => {
+    crossrefCalls += 1;
+    const url =
+      `https://api.crossref.org/works` +
+      `?query.title=${encodeURIComponent(`"${kw}"`)}` +
+      `&filter=${encodeURIComponent(`from-pub-date:${fromDate},until-pub-date:${toDate}`)}` +
+      `&sort=relevance&rows=5&mailto=schaum@mju.ac.kr`;
+    const items = await fetchCrossrefWorksByUrl(url);
+    return items
+      .filter((it) => isYouthRelevantText(`${it.title?.[0] || ''} ${it['container-title']?.[0] || ''}`))
+      .map((item) => ({
+        item,
+        hintCategory: inferYouthCategoryFromText(`${kw} ${item.title?.[0] || ''}`),
+      }));
+  });
+
+  for (const group of [...crJournalResults, ...crOverseasResults]) {
+    crDirectCandidates.push(...group);
+  }
+
+  // 4. Deduplicate & prioritize domestic papers first
+  const seenAuthorYearSet = new Set<string>();
+  const dedupedDrafts: CollectedPaperDraft[] = [];
+
+  const isDuplicateDraft = (doi: string, oaId: string, title: string, firstAuthor: string, pubDate: string) => {
     const normTitle = normalizeText(title);
+    const pubYear = pubDate.slice(0, 4);
+    const authorYearKey =
+      firstAuthor && firstAuthor !== '저자 정보 확인 중' && pubYear
+        ? `${normalizeText(firstAuthor)}_${pubYear}_${normTitle.slice(0, 18)}`
+        : '';
 
-    if (!title || title.length < 3) continue;
-    if (oaId && existingOaSet.has(oaId)) continue;
-    if (doi && existingDoiSet.has(doi)) continue;
-    if (existingTitleSet.has(normTitle)) continue;
+    if (!title || title.length < 3) return true;
+    if (oaId && existingOaSet.has(oaId)) return true;
+    if (doi && existingDoiSet.has(doi)) return true;
+    if (existingTitleSet.has(normTitle)) return true;
+    if (authorYearKey && seenAuthorYearSet.has(authorYearKey)) return true;
 
     existingTitleSet.add(normTitle);
     if (oaId) existingOaSet.add(oaId);
     if (doi) existingDoiSet.add(doi);
+    if (authorYearKey) seenAuthorYearSet.add(authorYearKey);
+    return false;
+  };
 
-    freshEntries.push(entry);
-    if (freshEntries.length >= 16) break;
-  }
-
-  // 4. Enrich with Crossref REST API (DOI, authors, journal, publicationDate, abstract, URL)
-  const enrichedPapers: CollectedPaperDraft[] = await Promise.all(
-    freshEntries.map(async ({ work, hintCategory }) => {
+  // Convert & enrich OpenAlex candidates
+  const oaCandidatesList = Array.from(oaCandidateMap.values()).slice(0, maxFreshLimit);
+  const enrichedOaPapers: CollectedPaperDraft[] = await Promise.all(
+    oaCandidatesList.map(async ({ work, hintCategory }) => {
       const doiClean = normalizeDoi(work.doi);
       let crItem: CrossrefWorkItem | null = null;
       if (doiClean) {
@@ -1201,6 +1977,12 @@ async function handleCollectPapers(req: Request, res: Response) {
         .trim()
         .slice(0, 200);
 
+      const publisher = (
+        work.primary_location?.source?.host_organization_name ||
+        crItem?.publisher ||
+        ''
+      ).trim();
+
       const publicationDate = (
         work.publication_date ||
         formatCrossrefDate(crItem || {}) ||
@@ -1219,14 +2001,32 @@ async function handleCollectPapers(req: Request, res: Response) {
         ...(work.primary_location?.source?.country_code
           ? [work.primary_location.source.country_code]
           : []),
-        ...(work.authorships?.flatMap((a) => a.countries || []) || []),
+        ...(work.authorships?.flatMap((a) => [
+          ...(a.countries || []),
+          ...((a.institutions || []).map((i) => i.country_code || '').filter(Boolean)),
+        ]) || []),
       ];
-      const isDomestic = detectDomesticPaper({
+      const institutions = [
+        ...(work.authorships?.flatMap((a) =>
+          (a.institutions || []).map((i) => i.display_name || '').filter(Boolean)
+        ) || []),
+        ...(crItem?.author?.flatMap((a) => (a.affiliation || []).map((af) => af.name || '').filter(Boolean)) || []),
+      ];
+      const issns = [
+        ...(work.primary_location?.source?.issn || []),
+        ...(crItem?.ISSN || []),
+      ];
+
+      const regionInfo = classifyPaperRegion({
         language,
         title,
         journalName,
+        publisher,
         abstract,
+        doi: doiClean,
+        issns,
         countryCodes,
+        institutions,
       });
 
       const keywords = Array.from(
@@ -1245,16 +2045,14 @@ async function handleCollectPapers(req: Request, res: Response) {
         (doiClean ? `https://doi.org/${doiClean}` : openAlexId)
       ).slice(0, 500);
 
-      const paperId = makeSafePaperId(openAlexId, doiClean, title);
-
       return {
-        paperId,
+        paperId: makeSafePaperId(openAlexId, doiClean, title),
         title,
         authors,
         journalName,
         publicationDate,
         language,
-        region: isDomestic ? 'domestic' : 'international',
+        region: regionInfo.region,
         abstract,
         keywords,
         doi: doiClean.slice(0, 200),
@@ -1269,17 +2067,97 @@ async function handleCollectPapers(req: Request, res: Response) {
     })
   );
 
-  const domesticCount = enrichedPapers.filter((p) => p.region === 'domestic').length;
-  const internationalCount = enrichedPapers.length - domesticCount;
+  // Convert Crossref direct candidates
+  const directCrDrafts: CollectedPaperDraft[] = [];
+  for (const { item, hintCategory } of crDirectCandidates) {
+    const draft = normalizeCrossrefCandidate(item, hintCategory, toDate);
+    if (!draft) continue;
+    if (draft.publicationDate < fromDate || draft.publicationDate > toDate) continue;
+    directCrDrafts.push(draft);
+  }
+
+  // Merge OpenAlex + Crossref direct drafts, deduplicate per region while preserving journal diversity
+  const uniqueDomestic: CollectedPaperDraft[] = [];
+  const uniqueInternational: CollectedPaperDraft[] = [];
+
+  const sortedPool = [...enrichedOaPapers, ...directCrDrafts].sort((a, b) =>
+    (b.publicationDate || '').localeCompare(a.publicationDate || '')
+  );
+
+  for (const draft of sortedPool) {
+    if (
+      isDuplicateDraft(
+        draft.doi,
+        draft.openAlexId,
+        draft.title,
+        draft.authors[0] || '',
+        draft.publicationDate
+      )
+    ) {
+      continue;
+    }
+    if (draft.region === 'domestic') {
+      uniqueDomestic.push(draft);
+    } else {
+      uniqueInternational.push(draft);
+    }
+  }
+
+  // Round-robin interleave domestic drafts by journal so all 6 Korean Youth journals are represented
+  const domesticByJournal = new Map<string, CollectedPaperDraft[]>();
+  for (const d of uniqueDomestic) {
+    const key = d.journalName || '기타';
+    const arr = domesticByJournal.get(key) || [];
+    arr.push(d);
+    domesticByJournal.set(key, arr);
+  }
+  const interleavedDomestic: CollectedPaperDraft[] = [];
+  const journalQueues = Array.from(domesticByJournal.values());
+  let roundIdx = 0;
+  while (interleavedDomestic.length < uniqueDomestic.length) {
+    let addedInRound = false;
+    for (const queue of journalQueues) {
+      if (roundIdx < queue.length) {
+        interleavedDomestic.push(queue[roundIdx]);
+        addedInRound = true;
+      }
+    }
+    if (!addedInRound) break;
+    roundIdx += 1;
+  }
+
+  // Domestic-first (~65%) + International complement (~35%), filling remaining slots if either pool is smaller
+  const targetDomestic = Math.ceil(maxFreshLimit * 0.65);
+  const targetIntl = Math.max(1, maxFreshLimit - targetDomestic);
+
+  const pickedDomestic = interleavedDomestic.slice(0, targetDomestic);
+  const pickedIntl = uniqueInternational.slice(0, targetIntl);
+  dedupedDrafts.push(...pickedDomestic, ...pickedIntl);
+
+  if (dedupedDrafts.length < maxFreshLimit) {
+    const remainingPool = [
+      ...interleavedDomestic.slice(pickedDomestic.length),
+      ...uniqueInternational.slice(pickedIntl.length),
+    ];
+    for (const draft of remainingPool) {
+      dedupedDrafts.push(draft);
+      if (dedupedDrafts.length >= maxFreshLimit) break;
+    }
+  }
+
+  const domesticCount = dedupedDrafts.filter((p) => p.region === 'domestic').length;
+  const internationalCount = dedupedDrafts.length - domesticCount;
   const koreanCoverageNotice =
-    domesticCount < 3 || expandedKoreanSearchUsed
-      ? '국내 학술지의 OpenAlex·Crossref 색인 시차로 인해 일부 최신 국내 논문이 수집되지 않았을 수 있습니다. 추가 국내 논문은 각 논문 또는 상단의 구글 학술검색(Google Scholar) 바로가기를 통해 함께 확인하실 수 있습니다.'
-      : '';
+    !process.env.OPENALEX_API_KEY?.trim() && openAlexBudgetExhausted
+      ? 'OpenAlex 공용 IP 할당량 제한(429)으로 Crossref 한국 청소년학 학술지·해외 키워드 기반 보완 수집을 수행했습니다. AI Studio Secrets에 무료 OPENALEX_API_KEY를 등록하면 OpenAlex 30개 확장 검색어도 함께 동작합니다.'
+      : domesticCount < 3
+        ? 'OpenAlex·Crossref 국내 학술지 색인 시차로 인해 일부 최신 국내 논문이 누락될 수 있습니다. 국회도서관·국립중앙도서관 API 키 설정 후 전체 국내 자료 연동이 가능합니다.'
+        : '';
 
   res.json({
-    papers: enrichedPapers,
+    papers: dedupedDrafts,
     stats: {
-      collectedCount: enrichedPapers.length,
+      collectedCount: dedupedDrafts.length,
       domesticCount,
       internationalCount,
       openAlexCalls,
@@ -1289,8 +2167,248 @@ async function handleCollectPapers(req: Request, res: Response) {
       fromDate,
       toDate,
       lookbackMonths,
+      koreanKeywordsApplied: CORE_KOREAN_KEYWORDS.length + EXTENDED_KOREAN_KEYWORDS.length,
+      overseasKeywordsApplied: OVERSEAS_ENGLISH_KEYWORDS.length,
     },
   });
+}
+
+async function searchGlobalOpenAlexAndCrossref(params: {
+  query: string;
+  regionScope?: 'all' | 'domestic' | 'international';
+  lookbackMonths?: number;
+  limit?: number;
+}) {
+  const cleanQuery = params.query.trim() || '청소년지도';
+  const regionScope = params.regionScope || 'all';
+  const { fromDate, toDate, lookbackMonths } = getDateRangeByMonths(params.lookbackMonths || 12);
+  const limit = Math.min(Math.max(Number(params.limit || 10), 1), 20);
+
+  let openAlexStatus: 'connected' | 'rate_limited_429' | 'error' = 'connected';
+  let openAlexNote = '';
+  const items: Array<{
+    paperId: string;
+    title: string;
+    authors: string[];
+    journalName: string;
+    publisher: string;
+    publicationDate: string;
+    language: string;
+    country: string;
+    region: 'domestic' | 'international';
+    regionReason: string;
+    doi: string;
+    paperUrl: string;
+    source: string;
+  }> = [];
+
+  const seenDoi = new Set<string>();
+  const seenTitle = new Set<string>();
+
+  // 1. Try OpenAlex first
+  try {
+    const filterParts = [`from_publication_date:${fromDate}`, `to_publication_date:${toDate}`, `default.search:${cleanQuery}`];
+    if (regionScope === 'domestic' && /[가-힣]/.test(cleanQuery)) {
+      filterParts.push('language:ko');
+    }
+    const oaWorks = await fetchOpenAlexWorks({
+      filter: filterParts.join(','),
+      page: 1,
+      perPage: Math.min(limit, 8),
+    });
+
+    for (const work of oaWorks) {
+      const title = (work.title || work.display_name || '').trim();
+      if (!title) continue;
+      const doiClean = normalizeDoi(work.doi);
+      const normT = normalizeText(title);
+      if ((doiClean && seenDoi.has(doiClean)) || seenTitle.has(normT)) continue;
+
+      const journalName = work.primary_location?.source?.display_name || '학술지 미상';
+      const publisher = work.primary_location?.source?.host_organization_name || '';
+      const language = work.language || (/[가-힣]/.test(title) ? 'ko' : 'en');
+      const countryCodes = [
+        ...(work.primary_location?.source?.country_code ? [work.primary_location.source.country_code] : []),
+        ...(work.authorships?.flatMap((a) => [
+          ...(a.countries || []),
+          ...((a.institutions || []).map((i) => i.country_code || '').filter(Boolean)),
+        ]) || []),
+      ];
+      const institutions =
+        work.authorships?.flatMap((a) =>
+          (a.institutions || []).map((i) => i.display_name || '').filter(Boolean)
+        ) || [];
+
+      const regionInfo = classifyPaperRegion({
+        language,
+        title,
+        journalName,
+        publisher,
+        doi: doiClean,
+        issns: work.primary_location?.source?.issn || [],
+        countryCodes,
+        institutions,
+      });
+
+      if (regionScope !== 'all' && regionInfo.region !== regionScope) continue;
+      if (doiClean) seenDoi.add(doiClean);
+      seenTitle.add(normT);
+
+      items.push({
+        paperId: makeSafePaperId(work.id || '', doiClean, title),
+        title: title.slice(0, 280),
+        authors:
+          (work.authorships || [])
+            .map((a) => a.author?.display_name?.trim())
+            .filter((n): n is string => Boolean(n))
+            .slice(0, 8) || ['저자 정보 미제공'],
+        journalName,
+        publisher,
+        publicationDate: work.publication_date || '',
+        language,
+        country: regionInfo.country,
+        region: regionInfo.region,
+        regionReason: regionInfo.reason,
+        doi: doiClean,
+        paperUrl:
+          work.open_access?.oa_url ||
+          work.primary_location?.landing_page_url ||
+          (doiClean ? `https://doi.org/${doiClean}` : work.id || ''),
+        source: 'OpenAlex',
+      });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === 'OPENALEX_DAILY_BUDGET_429') {
+      openAlexStatus = 'rate_limited_429';
+      openAlexNote =
+        'OpenAlex 공용 IP 일일 할당량(429)이 소진되어 Crossref REST API 실데이터로 조회했습니다. (OPENALEX_API_KEY 등록 시 OpenAlex 동시 조회 가능)';
+    } else {
+      openAlexStatus = 'error';
+      openAlexNote = `OpenAlex 조회 오류: ${msg}`;
+    }
+  }
+
+  // 2. Query Crossref (Domestic Korean journals if domestic/all, and keyword search for international/all)
+  const crTargets: Promise<CrossrefWorkItem[]>[] = [];
+  if (regionScope === 'domestic' || regionScope === 'all') {
+    for (const j of KOREAN_YOUTH_JOURNALS.slice(0, 4)) {
+      crTargets.push(
+        fetchCrossrefWorksByUrl(
+          `https://api.crossref.org/prefixes/${j.doiPrefix}/works?filter=${encodeURIComponent(
+            `from-pub-date:${fromDate},until-pub-date:${toDate}`
+          )}&sort=published&order=desc&rows=3&mailto=schaum@mju.ac.kr`
+        )
+      );
+    }
+  }
+  if (regionScope === 'international' || regionScope === 'all' || !/[가-힣]/.test(cleanQuery)) {
+    const queryTerm = /[가-힣]/.test(cleanQuery) ? 'Korea youth' : `"${cleanQuery}"`;
+    crTargets.push(
+      fetchCrossrefWorksByUrl(
+        `https://api.crossref.org/works?query.title=${encodeURIComponent(queryTerm)}&filter=${encodeURIComponent(
+          `from-pub-date:${fromDate},until-pub-date:${toDate}`
+        )}&sort=relevance&rows=5&mailto=schaum@mju.ac.kr`
+      )
+    );
+  }
+
+  const crBatches = await Promise.all(crTargets);
+  for (const batch of crBatches) {
+    for (const cr of batch) {
+      const title = stripTags(String(cr.title?.[0] || '')).slice(0, 280);
+      if (!title) continue;
+      const doiClean = normalizeDoi(cr.DOI);
+      const normT = normalizeText(title);
+      if ((doiClean && seenDoi.has(doiClean)) || seenTitle.has(normT)) continue;
+
+      const pubDate = formatCrossrefDate(cr);
+      if (pubDate && (pubDate < fromDate || pubDate > toDate)) continue;
+
+      const journalName = stripTags(String(cr['container-title']?.[0] || cr.publisher || '학술지 미상'));
+      const publisher = stripTags(String(cr.publisher || ''));
+      const language = cr.language || (/[가-힣]/.test(title) ? 'ko' : 'en');
+      const affiliations = (cr.author || [])
+        .flatMap((a) => (a.affiliation || []).map((af) => af.name || ''))
+        .filter(Boolean);
+
+      const regionInfo = classifyPaperRegion({
+        language,
+        title,
+        journalName,
+        publisher,
+        abstract: cr.abstract ? stripTags(cr.abstract) : '',
+        doi: doiClean,
+        issns: cr.ISSN || [],
+        institutions: affiliations,
+      });
+
+      if (regionScope !== 'all' && regionInfo.region !== regionScope) continue;
+      if (doiClean) seenDoi.add(doiClean);
+      seenTitle.add(normT);
+
+      const authors = (cr.author || [])
+        .map((a) => a.name || [a.family, a.given].filter(Boolean).join(' ').trim())
+        .filter(Boolean)
+        .slice(0, 8);
+
+      items.push({
+        paperId: makeSafePaperId('', doiClean, title),
+        title,
+        authors: authors.length > 0 ? authors : ['저자 정보 확인 중'],
+        journalName,
+        publisher,
+        publicationDate: pubDate,
+        language,
+        country: regionInfo.country,
+        region: regionInfo.region,
+        regionReason: regionInfo.reason,
+        doi: doiClean,
+        paperUrl: cr.URL || (doiClean ? `https://doi.org/${doiClean}` : ''),
+        source: 'Crossref',
+      });
+    }
+  }
+
+  // Sort matched query terms first, then newest date
+  const qLower = cleanQuery.toLowerCase();
+  const matchedGroup = KOREAN_KEYWORD_GROUPS.find((g) =>
+    g.keywords.some((k) => k === cleanQuery || cleanQuery.includes(k))
+  );
+  const enTerms = matchedGroup?.enMatchTerms || [];
+
+  items.sort((a, b) => {
+    const aText = `${a.title} ${a.journalName} ${a.publisher}`.toLowerCase();
+    const bText = `${b.title} ${b.journalName} ${b.publisher}`.toLowerCase();
+    const aHit = aText.includes(qLower) || enTerms.some((t) => aText.includes(t)) ? 1 : 0;
+    const bHit = bText.includes(qLower) || enTerms.some((t) => bText.includes(t)) ? 1 : 0;
+    if (aHit !== bHit) return bHit - aHit;
+    return (b.publicationDate || '').localeCompare(a.publicationDate || '');
+  });
+
+  const limited = items.slice(0, limit);
+  const domesticCount = limited.filter((i) => i.region === 'domestic').length;
+  const internationalCount = limited.length - domesticCount;
+
+  return {
+    ok: limited.length > 0 || openAlexStatus === 'connected',
+    query: cleanQuery,
+    regionScope,
+    fromDate,
+    toDate,
+    lookbackMonths,
+    openAlexStatus,
+    openAlexKeyConfigured: Boolean(process.env.OPENALEX_API_KEY?.trim()),
+    openAlexNote,
+    totalReturned: limited.length,
+    domesticCount,
+    internationalCount,
+    papers: limited,
+    message:
+      limited.length > 0
+        ? `OpenAlex·Crossref 연계 조회 완료: 총 ${limited.length}건 (국내 ${domesticCount}건 · 해외 ${internationalCount}건 · 기간 ${fromDate}~${toDate})`
+        : openAlexNote || '해당 조건에 일치하는 공개 논문이 검색되지 않았습니다.',
+  };
 }
 
 // ---------- Gemini AI Classification & Structured Paper Analysis ----------
@@ -1538,21 +2656,24 @@ async function handleAnalyzePapers(req: Request, res: Response) {
 
 async function handleGenerateMonthlyReport(req: Request, res: Response) {
   const body = (req.body || {}) as {
+    reportId?: string;
     monthLabel?: string;
     periodRange?: string;
     papers?: Array<{
       title: string;
+      authors?: string[];
       mainCategory: string;
       region: string;
       publicationDate: string;
       journalName: string;
+      citedByCount?: number;
       easySummary?: string;
       researchFindings?: string;
       practicalImplications?: string;
     }>;
   };
 
-  const papers = Array.isArray(body.papers) ? body.papers.slice(0, 40) : [];
+  const papers = Array.isArray(body.papers) ? body.papers.slice(0, 50) : [];
   if (papers.length === 0) {
     res.status(400).json({ error: '월간 보고서를 생성할 수집 논문이 없습니다.' });
     return;
@@ -1561,16 +2682,54 @@ async function handleGenerateMonthlyReport(req: Request, res: Response) {
   try {
     const ai = getGeminiClient();
     const schedule = getKstScheduleInfo();
-    const monthLabel = body.monthLabel || `${schedule.currentMonthKey.replace('-', '년 ')}월`;
-    const periodRange = body.periodRange || '최근 12개월 수집 논문 종합';
+    const monthLabel = String(body.monthLabel || `${schedule.currentMonthKey.replace('-', '년 ')}월`)
+      .trim()
+      .slice(0, 60);
+    const periodRange = String(body.periodRange || '최근 수집 논문 종합').trim().slice(0, 80);
+
+    const domesticCount = papers.filter((p) => p.region === 'domestic').length;
+    const internationalCount = papers.length - domesticCount;
+    const categoryStats = YOUTH_CATEGORIES.map((cat) => {
+      const count = papers.filter((p) => p.mainCategory === cat).length;
+      return `${cat}: ${count}편`;
+    }).join(', ');
+
+    const dates = papers
+      .map((p) => (p.publicationDate || '').slice(0, 10))
+      .filter((d) => /^\d{4}/.test(d))
+      .sort();
+    const dateSpan = dates.length > 0 ? `${dates[0]} ~ ${dates[dates.length - 1]}` : '미상';
+
+    const sanitizedReportId = body.reportId
+      ? String(body.reportId)
+          .replace(/[^a-zA-Z0-9_-]/g, '')
+          .slice(0, 48)
+      : `report_${schedule.currentMonthKey.replace(/[^0-9]/g, '')}`;
 
     const prompt = [
-      `당신은 명지대학교 대학원 청소년지도학과 연구정보 플랫폼의 월간 연구동향 보고서 편집자입니다.`,
-      `아래 실제 수집된 논문들의 제목, 분야, 요약 및 확인된 결과를 종합하여 '${monthLabel} 청소년지도 최신 연구동향 보고서'를 한국어로 작성하세요.`,
-      `반드시 제공된 논문 목록에 있는 내용만 근거로 작성하고, 없는 논문이나 수치를 지어내지 마세요.`,
+      `당신은 명지대학교 대학원 청소년지도학과 연구정보 플랫폼의 월간 연구동향 보고서 수석 편집자입니다.`,
+      `아래 실제로 수집·검증된 논문 메타데이터와 AI 요약만을 근거로 '${monthLabel} 청소년지도 연구동향 종합 보고서'를 한국어로 정교하게 작성하세요.`,
+      ``,
+      `[절대 준수 원칙]`,
+      `1. 반드시 제공된 논문 목록에 포함된 논문 제목, 저자, 학술지, 연구결과만 인용·종합하세요. 목록에 없는 논문, 저자, 수치를 절대 지어내지 마세요.`,
+      `2. 각 항목은 대학원생(석·박사 과정)과 청소년지도 현장 실무자가 한눈에 파악할 수 있도록 번호/불릿(•)과 문단을 명확히 구분해 작성하세요.`,
+      `3. 각 항목의 분량 제한을 초과하지 마세요 (categoryFlows 1800자 이내, notablePapers 1500자 이내, 나머지 항목 각 1200자 이내).`,
+      ``,
+      `[대상 코퍼스 통계]`,
+      `- 보고서 기간/범위: ${periodRange} (논문 발행일 분포: ${dateSpan})`,
+      `- 분석 대상 편수: 총 ${papers.length}편 (국내 ${domesticCount}편 · 해외 ${internationalCount}편)`,
+      `- 6대 분야별 분포: ${categoryStats}`,
+      ``,
+      `[작성 지침]`,
+      `- categoryFlows: 6대 분야별 연구 편수 분포를 바탕으로 이번 기간 어느 분야의 연구가 활발했는지, 국내 연구와 해외 연구의 주제적 차이가 무엇인지 구조적으로 서술`,
+      `- notablePapers: 제공된 논문 중 연구 의의·현장 적용성·주제 대표성이 높은 논문 3~5편을 선별하여 '[논문 제목] (저자/학술지, 발행연월)' 형식과 선정 사유를 개조식으로 작성`,
+      `- keyThemes: 전체 논문들을 관통하는 핵심 연구 키워드·주제군 3~4가지를 묶어 '• 주제명: 상세 내용' 형식으로 작성`,
+      `- commonFindings: 초록 및 요약에서 확인되는 주요 방법론적 경향과 공통 실증 결과를 종합`,
+      `- researchGaps: 현재 수집된 논문군에서 상대적으로 부족한 대상·분야·연구방법 및 후속 연구가 필요한 공백을 구체적으로 제안`,
+      `- fieldImplications: 청소년수련관·문화의집·상담복지센터 등 청소년지도 현장과 정책·대학원 연구자를 위한 실천적 시사점을 제언`,
       ``,
       `[수집된 논문 목록 (${papers.length}편)]`,
-      JSON.stringify(papers, null, 2).slice(0, 16000),
+      JSON.stringify(papers, null, 2).slice(0, 22000),
     ].join('\n');
 
     const response = await ai.models.generateContent({
@@ -1605,7 +2764,7 @@ async function handleGenerateMonthlyReport(req: Request, res: Response) {
 
     res.json({
       report: {
-        reportId: `report_${schedule.currentMonthKey.replace(/[^0-9]/g, '')}`,
+        reportId: sanitizedReportId || `report_${schedule.currentMonthKey.replace(/[^0-9]/g, '')}`,
         monthLabel,
         periodRange,
         categoryFlows: String(parsed.categoryFlows || '').trim().slice(0, 4000),
@@ -1919,6 +3078,8 @@ async function startServer() {
       geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
       nanetConfigured: Boolean(process.env.NANET_API_KEY?.trim()),
       nlConfigured: Boolean(process.env.NL_API_KEY?.trim()),
+      dbpiaConfigured: Boolean(process.env.DBPIA_API_KEY?.trim()),
+      openAlexKeyConfigured: Boolean(process.env.OPENALEX_API_KEY?.trim()),
       schedule: getKstScheduleInfo(),
       timestamp: new Date().toISOString(),
     });
@@ -1933,6 +3094,14 @@ async function startServer() {
         extended: [...EXTENDED_KOREAN_KEYWORDS],
         totalCount: CORE_KOREAN_KEYWORDS.length + EXTENDED_KOREAN_KEYWORDS.length,
       },
+      overseasKeywords: [...OVERSEAS_ENGLISH_KEYWORDS],
+      koreanJournals: KOREAN_YOUTH_JOURNALS.map((j) => ({
+        nameKo: j.nameKo,
+        nameEn: j.nameEn,
+        publisherEn: j.publisherEn,
+        issn: j.issn,
+        doiPrefix: j.doiPrefix,
+      })),
       checkedAtIso: new Date().toISOString(),
     });
   });
@@ -1997,8 +3166,93 @@ async function startServer() {
     }
   });
 
-  app.get('/api/papers/schedule-info', (_req: Request, res: Response) => {
-    res.json(getKstScheduleInfo());
+  app.post('/api/sources/global/search', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        query?: string;
+        regionScope?: 'all' | 'domestic' | 'international';
+        lookbackMonths?: number;
+        limit?: number;
+      };
+      const result = await searchGlobalOpenAlexAndCrossref({
+        query: typeof body.query === 'string' ? body.query : '청소년지도',
+        regionScope:
+          body.regionScope === 'domestic' || body.regionScope === 'international'
+            ? body.regionScope
+            : 'all',
+        lookbackMonths: body.lookbackMonths,
+        limit: body.limit,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(502).json({
+        ok: false,
+        totalReturned: 0,
+        domesticCount: 0,
+        internationalCount: 0,
+        papers: [],
+        message:
+          err instanceof Error
+            ? `OpenAlex·Crossref 실데이터 조회 중 오류가 발생했습니다: ${err.message}`
+            : 'OpenAlex·Crossref 실데이터 조회 중 오류가 발생했습니다.',
+      });
+    }
+  });
+
+  app.post('/api/sources/dbpia/search', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        query?: string;
+        sortType?: '1' | '2';
+        pageNo?: number;
+        pageCount?: number;
+      };
+      const result = await searchDbpiaOpenApi({
+        query: typeof body.query === 'string' ? body.query : '청소년지도',
+        sortType: body.sortType === '1' ? '1' : '2',
+        pageNo: body.pageNo,
+        pageCount: body.pageCount,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(502).json({
+        ok: false,
+        configured: Boolean(process.env.DBPIA_API_KEY?.trim()),
+        status: 'api_error',
+        source: 'dbpia',
+        papers: [],
+        totalCount: 0,
+        message:
+          err instanceof Error
+            ? `DBpia Open API 호출 중 네트워크 오류가 발생했습니다: ${err.message}`
+            : 'DBpia Open API 호출 중 오류가 발생했습니다.',
+      });
+    }
+  });
+
+  app.get('/api/papers/schedule-info', (req: Request, res: Response) => {
+    const atParam = typeof req.query.at === 'string' ? new Date(req.query.at) : new Date();
+    res.json(getKstScheduleInfo(atParam));
+  });
+
+  app.post('/api/papers/schedule-check', (req: Request, res: Response) => {
+    const body = (req.body || {}) as {
+      nowIso?: string;
+      lastSyncedAtIso?: string | null;
+      scheduleCron?: string;
+      autoEnabled?: boolean;
+      papersCount?: number;
+    };
+    const nowInput = body.nowIso ? new Date(body.nowIso) : new Date();
+    res.json(
+      evaluateServerMonthlySchedule({
+        nowInput,
+        lastSyncedAtIso: body.lastSyncedAtIso ?? null,
+        scheduleCron: body.scheduleCron ?? '0 3 1 * *',
+        autoEnabled: body.autoEnabled ?? true,
+        papersCount: Number(body.papersCount ?? 0),
+      })
+    );
   });
 
   app.post('/api/papers/collect', handleCollectPapers);

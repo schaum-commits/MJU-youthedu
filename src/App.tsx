@@ -266,7 +266,7 @@ function WorkspaceShell() {
         existingPapers: papers,
         autoEnabled: researchSyncStatus?.autoEnabled ?? true,
         currentStatus: researchSyncStatus,
-        lookbackMonths: 3,
+        lookbackMonths: papers.length === 0 ? 12 : 3,
         perCategoryLimit: 3,
         generateReportToo: true,
       });

@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Clock,
   Database,
+  Download,
   Edit3,
   Eye,
   EyeOff,
@@ -52,16 +53,27 @@ import {
 import {
   AcademicSourcesStatusResponse,
   collectAndAnalyzePapers,
+  DbpiaSearchTestResult,
+  evaluateMonthlySyncDue,
   fetchAcademicSourcesStatus,
   generateMonthlyTrendReport,
   getKstScheduleContext,
+  GlobalAcademicSearchResult,
   isSyncActivelyRunning,
+  MonthlyReportScope,
   NanetSearchTestResult,
   NlSearchTestResult,
+  resetStaleYouthSyncLock,
   retryFailedPapers,
+  runAdminSystemDiagnostics,
+  SystemDiagnosticsReport,
+  testDbpiaPaperSearch,
+  testGlobalAcademicSearch,
   testNanetPaperSearch,
   testNlPaperSearch,
   togglePaperVisibility,
+  toggleYouthResearchAutoSync,
+  updateMonthlyTrendReportFields,
 } from '../lib/youthPaperSync';
 import { DEFAULT_PUBLIC_SETTINGS, seedInitialWorkspaceData } from '../lib/seedData';
 import {
@@ -128,9 +140,44 @@ export function AdminConsolePage({
 
   // Youth Research Automation State
   const [syncLogs, setSyncLogs] = useState<ResearchSyncLog[]>([]);
-  const [runningYouthLookback, setRunningYouthLookback] = useState<3 | 12 | null>(null);
+  const [runningYouthLookback, setRunningYouthLookback] = useState<3 | 12 | 60 | null>(null);
   const [retryingFailed, setRetryingFailed] = useState(false);
+  const [retryYouthProgress, setRetryYouthProgress] = useState<{ done: number; total: number } | null>(
+    null
+  );
+  const [togglingYouthAuto, setTogglingYouthAuto] = useState(false);
+  const [resettingYouthLock, setResettingYouthLock] = useState(false);
+  const [syncLogStatusFilter, setSyncLogStatusFilter] = useState<
+    'all' | 'success' | 'partial' | 'error'
+  >('all');
+  const [syncLogTriggerFilter, setSyncLogTriggerFilter] = useState<
+    'all' | 'scheduled_monthly' | 'manual' | 'retry_failed'
+  >('all');
   const [generatingMonthlyReport, setGeneratingMonthlyReport] = useState(false);
+  const [monthlyReportScope, setMonthlyReportScope] = useState<MonthlyReportScope>('all');
+  const [editingReportId, setEditingReportId] = useState<string | null>(null);
+  const [savingReportEdit, setSavingReportEdit] = useState(false);
+  const [reportDraft, setReportDraft] = useState<{
+    monthLabel: string;
+    periodRange: string;
+    categoryFlows: string;
+    notablePapers: string;
+    keyThemes: string;
+    commonFindings: string;
+    researchGaps: string;
+    fieldImplications: string;
+    isPublished: boolean;
+  }>({
+    monthLabel: '',
+    periodRange: '',
+    categoryFlows: '',
+    notablePapers: '',
+    keyThemes: '',
+    commonFindings: '',
+    researchGaps: '',
+    fieldImplications: '',
+    isPublished: true,
+  });
   const [confirmDeletePaperId, setConfirmDeletePaperId] = useState<string | null>(null);
   const [confirmDeleteReportId, setConfirmDeleteReportId] = useState<string | null>(null);
   const [sourcesStatus, setSourcesStatus] = useState<AcademicSourcesStatusResponse | null>(null);
@@ -141,6 +188,19 @@ export function AdminConsolePage({
   const [nlCategory, setNlCategory] = useState('학위논문');
   const [nlTesting, setNlTesting] = useState(false);
   const [nlTestResult, setNlTestResult] = useState<NlSearchTestResult | null>(null);
+  const [globalQuery, setGlobalQuery] = useState('청소년지도');
+  const [globalRegionScope, setGlobalRegionScope] = useState<'all' | 'domestic' | 'international'>(
+    'all'
+  );
+  const [globalLookback, setGlobalLookback] = useState<3 | 12 | 60>(60);
+  const [globalTesting, setGlobalTesting] = useState(false);
+  const [globalTestResult, setGlobalTestResult] = useState<GlobalAcademicSearchResult | null>(null);
+  const [dbpiaQuery, setDbpiaQuery] = useState('청소년지도');
+  const [dbpiaSortType, setDbpiaSortType] = useState<'2' | '1'>('2');
+  const [dbpiaTesting, setDbpiaTesting] = useState(false);
+  const [dbpiaTestResult, setDbpiaTestResult] = useState<DbpiaSearchTestResult | null>(null);
+  const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
+  const [diagnosticsReport, setDiagnosticsReport] = useState<SystemDiagnosticsReport | null>(null);
 
   // Members & Admins State
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -553,15 +613,30 @@ export function AdminConsolePage({
   const handleSaveActivity = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!authUser) return;
+    const cleanTitle = actTitle.trim().slice(0, LIMITS.title);
+    const cleanSummary = actSummary.trim().slice(0, LIMITS.summary);
+    const cleanContent = actContent.trim().slice(0, LIMITS.activityContent);
+    const cleanDate = actDate.trim().slice(0, LIMITS.eventDate);
+    const cleanLocation = actLocation.trim().slice(0, LIMITS.location);
+
+    if (cleanTitle.length < 2 || cleanSummary.length < 2 || cleanContent.length < 2) {
+      showToast('err', '활동 제목, 한 줄 요약, 상세 내용은 최소 2자 이상 입력해 주세요.');
+      return;
+    }
+    if (!cleanDate || !cleanLocation) {
+      showToast('err', '일시와 장소를 모두 입력해 주세요.');
+      return;
+    }
+
     setSavingActivity(true);
     try {
       const payload = {
-        title: actTitle.trim().slice(0, LIMITS.title),
+        title: cleanTitle,
         category: actCategory,
-        eventDate: actDate.trim().slice(0, LIMITS.eventDate),
-        location: actLocation.trim().slice(0, LIMITS.location),
-        summary: actSummary.trim().slice(0, LIMITS.summary),
-        content: actContent.trim().slice(0, LIMITS.activityContent),
+        eventDate: cleanDate,
+        location: cleanLocation,
+        summary: cleanSummary,
+        content: cleanContent,
         imageUrl: actImageUrl.trim().slice(0, LIMITS.url),
         isPublished: actPublished,
         updatedAt: serverTimestamp(),
@@ -616,11 +691,17 @@ export function AdminConsolePage({
   const handleSaveModBoardPost = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingBoardPost) return;
+    const cleanTitle = modTitle.trim().slice(0, LIMITS.title);
+    const cleanContent = modContent.trim().slice(0, LIMITS.boardContent);
+    if (cleanTitle.length < 2 || cleanContent.length < 2) {
+      showToast('err', '게시글 제목과 내용은 최소 2자 이상 입력해 주세요.');
+      return;
+    }
     try {
       await updateDoc(doc(db, 'boardPosts', editingBoardPost.id), {
-        title: modTitle.trim().slice(0, LIMITS.title),
+        title: cleanTitle,
         category: modCategory,
-        content: modContent.trim().slice(0, LIMITS.boardContent),
+        content: cleanContent,
         updatedAt: serverTimestamp(),
       });
       setEditingBoardPost(null);
@@ -633,12 +714,19 @@ export function AdminConsolePage({
   const handleSaveModTrend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTrend) return;
+    const cleanTitle = modTitle.trim().slice(0, LIMITS.trendTitle);
+    const cleanSource = modTrendSource.trim().slice(0, LIMITS.source);
+    const cleanSummary = modContent.trim().slice(0, LIMITS.trendSummary);
+    if (cleanTitle.length < 2 || !cleanSource || cleanSummary.length < 5) {
+      showToast('err', '제목(2자 이상), 출처(1자 이상), 요약(5자 이상)을 확인해 주세요.');
+      return;
+    }
     try {
       await updateDoc(doc(db, 'researchTrends', editingTrend.id), {
-        title: modTitle.trim().slice(0, LIMITS.trendTitle),
+        title: cleanTitle,
         category: modTrendCategory,
-        source: modTrendSource.trim().slice(0, LIMITS.source),
-        summary: modContent.trim().slice(0, LIMITS.trendSummary),
+        source: cleanSource,
+        summary: cleanSummary,
         updatedAt: serverTimestamp(),
       });
       setEditingTrend(null);
@@ -807,7 +895,79 @@ export function AdminConsolePage({
   const isYouthSyncActive =
     runningYouthLookback !== null || isSyncActivelyRunning(researchSyncStatus);
 
-  const handleYouthManualCollect = async (lookbackMonths: 3 | 12) => {
+  const monthlyScheduleEval = useMemo(
+    () =>
+      evaluateMonthlySyncDue({
+        researchSyncStatus,
+        papersCount: papers.length,
+      }),
+    [researchSyncStatus, papers.length]
+  );
+
+  const filteredSyncLogs = useMemo(() => {
+    return syncLogs.filter((log) => {
+      if (syncLogStatusFilter !== 'all' && log.status !== syncLogStatusFilter) return false;
+      if (syncLogTriggerFilter !== 'all' && log.triggerType !== syncLogTriggerFilter) return false;
+      return true;
+    });
+  }, [syncLogs, syncLogStatusFilter, syncLogTriggerFilter]);
+
+  const handleToggleYouthAutoSchedule = async () => {
+    if (!authUser || togglingYouthAuto) return;
+    const nextEnabled = researchSyncStatus?.autoEnabled === false;
+    setTogglingYouthAuto(true);
+    try {
+      await toggleYouthResearchAutoSync({
+        enabled: nextEnabled,
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+        currentStatus: researchSyncStatus,
+      });
+      showToast(
+        'ok',
+        nextEnabled
+          ? '매월 1일 03:00 (KST) 자동 논문 수집 스케줄이 활성화되었습니다.'
+          : '매월 1일 자동 논문 수집 스케줄이 일시 중지되었습니다.'
+      );
+    } finally {
+      setTogglingYouthAuto(false);
+    }
+  };
+
+  const handleResetYouthLock = async () => {
+    if (!authUser || resettingYouthLock) return;
+    setResettingYouthLock(true);
+    try {
+      await resetStaleYouthSyncLock({
+        authUser,
+        actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+        currentStatus: researchSyncStatus,
+      });
+      showToast('ok', '진행 중 잠금 상태가 해제되었습니다. 이제 수동·정기 수집을 실행할 수 있습니다.');
+    } finally {
+      setResettingYouthLock(false);
+    }
+  };
+
+  const handleExportSyncLogs = () => {
+    const payload = filteredSyncLogs.map((l) => ({
+      ...l,
+      createdAtIso: l.createdAt?.toDate ? l.createdAt.toDate().toISOString() : null,
+    }));
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sync_logs_${kstCtx.currentMonthKey}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleYouthManualCollect = async (lookbackMonths: 3 | 12 | 60) => {
     if (!authUser || isYouthSyncActive) return;
     setRunningYouthLookback(lookbackMonths);
     try {
@@ -819,7 +979,7 @@ export function AdminConsolePage({
         autoEnabled: researchSyncStatus?.autoEnabled ?? true,
         currentStatus: researchSyncStatus,
         lookbackMonths,
-        perCategoryLimit: lookbackMonths === 3 ? 4 : 3,
+        perCategoryLimit: lookbackMonths === 3 ? 4 : lookbackMonths === 60 ? 2 : 3,
         generateReportToo: true,
       });
       showToast(res.ok ? 'ok' : 'err', res.message);
@@ -831,15 +991,19 @@ export function AdminConsolePage({
   const handleRetryFailedAnalysis = async () => {
     if (!authUser || retryingFailed || pendingOrFailedPapers.length === 0) return;
     setRetryingFailed(true);
+    setRetryYouthProgress({ done: 0, total: Math.min(pendingOrFailedPapers.length, 48) });
     try {
       const res = await retryFailedPapers({
         failedPapers: pendingOrFailedPapers,
         authUser,
         actorName: profile?.displayName || authUser.displayName || '원우회 관리자',
+        maxPapers: 48,
+        onProgress: (done, total) => setRetryYouthProgress({ done, total }),
       });
       showToast(res.ok ? 'ok' : 'err', res.message);
     } finally {
       setRetryingFailed(false);
+      setRetryYouthProgress(null);
     }
   };
 
@@ -867,6 +1031,35 @@ export function AdminConsolePage({
     }
   };
 
+  const handleGlobalSearchTest = async () => {
+    if (globalTesting) return;
+    setGlobalTesting(true);
+    try {
+      const res = await testGlobalAcademicSearch({
+        query: globalQuery,
+        regionScope: globalRegionScope,
+        lookbackMonths: globalLookback,
+        limit: 12,
+      });
+      setGlobalTestResult(res);
+      showToast(res.ok ? 'ok' : 'err', res.message);
+    } finally {
+      setGlobalTesting(false);
+    }
+  };
+
+  const handleDbpiaSearchTest = async () => {
+    if (dbpiaTesting) return;
+    setDbpiaTesting(true);
+    try {
+      const res = await testDbpiaPaperSearch(dbpiaQuery, dbpiaSortType, 1, 10);
+      setDbpiaTestResult(res);
+      showToast(res.ok ? 'ok' : 'err', res.message);
+    } finally {
+      setDbpiaTesting(false);
+    }
+  };
+
   const handleAdminGenerateMonthlyReport = async () => {
     if (!authUser || generatingMonthlyReport) return;
     setGeneratingMonthlyReport(true);
@@ -876,10 +1069,70 @@ export function AdminConsolePage({
         newPapersCount: monthlyNewPapersCount,
         authUser,
         isPublished: true,
+        scope: monthlyReportScope,
       });
       showToast(res.ok ? 'ok' : 'err', res.message);
     } finally {
       setGeneratingMonthlyReport(false);
+    }
+  };
+
+  const openReportEditor = (report: MonthlyTrendReport) => {
+    setEditingReportId(report.reportId);
+    setReportDraft({
+      monthLabel: report.monthLabel,
+      periodRange: report.periodRange,
+      categoryFlows: report.categoryFlows,
+      notablePapers: report.notablePapers,
+      keyThemes: report.keyThemes,
+      commonFindings: report.commonFindings,
+      researchGaps: report.researchGaps,
+      fieldImplications: report.fieldImplications,
+      isPublished: report.isPublished,
+    });
+  };
+
+  const handleSaveReportEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingReportId || savingReportEdit) return;
+    setSavingReportEdit(true);
+    try {
+      await updateMonthlyTrendReportFields(editingReportId, reportDraft);
+      setEditingReportId(null);
+      showToast('ok', '월간 연구동향 보고서 수정 사항이 저장되었습니다.');
+    } catch (error) {
+      showToast(
+        'err',
+        error instanceof Error ? error.message : '보고서 수정 사항 저장 중 오류가 발생했습니다.'
+      );
+    } finally {
+      setSavingReportEdit(false);
+    }
+  };
+
+  const handleRunSystemDiagnostics = async () => {
+    if (diagnosticsRunning) return;
+    setDiagnosticsRunning(true);
+    try {
+      const report = await runAdminSystemDiagnostics({
+        authUser,
+        isAdmin,
+        papers,
+        monthlyReports,
+        syncLogs,
+        researchSyncStatus,
+      });
+      setDiagnosticsReport(report);
+      showToast(
+        report.overallStatus === 'fail' ? 'err' : 'ok',
+        report.overallStatus === 'pass'
+          ? '전체 시스템 · 보안 · API 통합 점검을 모두 통과했습니다.'
+          : report.overallStatus === 'warn'
+            ? '통합 점검 완료: 일부 선택 항목(환경변수 키 또는 미완료 논문)을 확인해 주세요.'
+            : '일부 점검 항목에서 실패가 감지되었습니다. 상세 내역을 확인해 주세요.'
+      );
+    } finally {
+      setDiagnosticsRunning(false);
     }
   };
 
@@ -923,6 +1176,9 @@ export function AdminConsolePage({
   const handleDeleteMonthlyReport = async (reportId: string) => {
     try {
       await deleteDoc(doc(db, 'monthlyReports', reportId));
+      if (editingReportId === reportId) {
+        setEditingReportId(null);
+      }
       setConfirmDeleteReportId(null);
       showToast('ok', '월간 보고서가 삭제되었습니다.');
     } catch (error) {
@@ -1970,7 +2226,7 @@ export function AdminConsolePage({
           {/* Status & Schedule Control Card */}
           <div className="rounded-xl border border-[#D5DFEE] bg-[#F4F7FB] p-5 space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-base font-bold text-stone-900">
                     월간 논문 자동 수집 · Gemini AI 분석 현황
@@ -1981,6 +2237,32 @@ export function AdminConsolePage({
                   <span className="text-xs font-semibold text-[#002968]">
                     스케줄: {kstCtx.cron} ({kstCtx.timezone})
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleToggleYouthAutoSchedule}
+                    disabled={togglingYouthAuto}
+                    className={`px-2 py-0.5 text-[11px] font-semibold rounded border cursor-pointer transition-colors ${
+                      researchSyncStatus?.autoEnabled === false
+                        ? 'bg-stone-100 text-stone-600 border-stone-300 hover:bg-stone-200'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                  >
+                    {togglingYouthAuto
+                      ? '변경 중...'
+                      : researchSyncStatus?.autoEnabled === false
+                        ? '자동 실행 일시중지됨 (클릭해 재개)'
+                        : '자동 스케줄 활성'}
+                  </button>
+                  {researchSyncStatus?.lastSyncStatus === 'syncing' && (
+                    <button
+                      type="button"
+                      onClick={handleResetYouthLock}
+                      disabled={resettingYouthLock}
+                      className="px-2 py-0.5 text-[11px] font-semibold rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 cursor-pointer"
+                    >
+                      {resettingYouthLock ? '잠금 해제 중...' : '진행 잠금 해제'}
+                    </button>
+                  )}
                 </div>
                 <p className="text-xs text-stone-600">
                   마지막 업데이트:{' '}
@@ -1995,6 +2277,16 @@ export function AdminConsolePage({
                   다음 정기 실행:{' '}
                   <span className="font-mono font-medium text-stone-800">
                     {kstCtx.nextRunLabel}
+                  </span>
+                  <span className="mx-1.5 text-stone-300" aria-hidden="true">
+                    ·
+                  </span>
+                  <span
+                    className={`font-medium ${
+                      monthlyScheduleEval.due ? 'text-amber-700' : 'text-emerald-700'
+                    }`}
+                  >
+                    {monthlyScheduleEval.reason}
                   </span>
                 </p>
                 {researchSyncStatus?.lastSyncMessage && (
@@ -2023,7 +2315,18 @@ export function AdminConsolePage({
                   <RefreshCw
                     className={`w-3.5 h-3.5 ${runningYouthLookback === 12 ? 'animate-spin' : ''}`}
                   />
-                  {runningYouthLookback === 12 ? '12개월 수집 중...' : '최근 12개월 전체 수집'}
+                  {runningYouthLookback === 12 ? '정기 12개월 수집 중...' : '정기 12개월 수집'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleYouthManualCollect(60)}
+                  disabled={isYouthSyncActive}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-60 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${runningYouthLookback === 60 ? 'animate-spin' : ''}`}
+                  />
+                  {runningYouthLookback === 60 ? '초기 5년 수집 중...' : '초기 5년 수집 (60개월)'}
                 </button>
                 <button
                   type="button"
@@ -2033,18 +2336,32 @@ export function AdminConsolePage({
                 >
                   <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
                   {retryingFailed
-                    ? 'AI 분석 실행 중...'
+                    ? retryYouthProgress
+                      ? `AI 분석 복구 중 (${retryYouthProgress.done}/${retryYouthProgress.total})...`
+                      : 'AI 분석 실행 중...'
                     : `대기·실패 논문 AI 분석 (${pendingOrFailedPapers.length}건)`}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleAdminGenerateMonthlyReport}
-                  disabled={generatingMonthlyReport || papers.length === 0}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-50 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <FileBarChart2 className="w-3.5 h-3.5 text-[#002968]" />
-                  {generatingMonthlyReport ? '보고서 생성 중...' : '월간 보고서 생성'}
-                </button>
+                <div className="inline-flex items-center gap-1.5">
+                  <select
+                    aria-label="월간 보고서 반영 범위"
+                    value={monthlyReportScope}
+                    onChange={(e) => setMonthlyReportScope(e.target.value as MonthlyReportScope)}
+                    className="px-2.5 py-2 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded-lg"
+                  >
+                    <option value="all">범위: 누적 전체</option>
+                    <option value="12m">범위: 최근 12개월</option>
+                    <option value="3m">범위: 최근 3개월</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleAdminGenerateMonthlyReport}
+                    disabled={generatingMonthlyReport || papers.length === 0}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-50 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <FileBarChart2 className="w-3.5 h-3.5 text-[#002968]" />
+                    {generatingMonthlyReport ? '보고서 생성 중...' : '월간 보고서 생성'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -2239,58 +2556,258 @@ export function AdminConsolePage({
                 </p>
               ) : (
                 monthlyReports.map((rep) => (
-                  <div
-                    key={rep.reportId}
-                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                  >
-                    <div>
-                      <p className="text-sm font-bold text-stone-900">
-                        {rep.monthLabel} 청소년지도 연구동향 보고서
-                      </p>
-                      <p className="text-xs text-stone-500 tabular-nums mt-0.5">
-                        {rep.periodRange} · 전체 {rep.totalPapersCount}편 (국내 {rep.domesticCount} /
-                        해외 {rep.internationalCount})
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleReportPublish(rep)}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded cursor-pointer ${
-                          rep.isPublished
-                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                            : 'bg-stone-100 text-stone-600 border border-stone-200'
-                        }`}
-                      >
-                        {rep.isPublished ? '공개중' : '비공개'}
-                      </button>
-                      {confirmDeleteReportId === rep.reportId ? (
-                        <span className="inline-flex items-center gap-1">
+                  <div key={rep.reportId} className="p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-stone-900">
+                          {rep.monthLabel} 청소년지도 연구동향 보고서
+                        </p>
+                        <p className="text-xs text-stone-500 tabular-nums mt-0.5">
+                          {rep.periodRange} · 전체 {rep.totalPapersCount}편 (국내 {rep.domesticCount} /
+                          해외 {rep.internationalCount})
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleReportPublish(rep)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded cursor-pointer ${
+                            rep.isPublished
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              : 'bg-stone-100 text-stone-600 border border-stone-200'
+                          }`}
+                        >
+                          {rep.isPublished ? '공개중' : '비공개'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            editingReportId === rep.reportId
+                              ? setEditingReportId(null)
+                              : openReportEditor(rep)
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 rounded cursor-pointer"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          {editingReportId === rep.reportId ? '편집 닫기' : '수정'}
+                        </button>
+                        {confirmDeleteReportId === rep.reportId ? (
+                          <span className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMonthlyReport(rep.reportId)}
+                              className="px-2 py-1 text-xs text-white bg-red-600 rounded cursor-pointer"
+                            >
+                              삭제 확인
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteReportId(null)}
+                              className="px-2 py-1 text-xs text-stone-500 cursor-pointer"
+                            >
+                              취소
+                            </button>
+                          </span>
+                        ) : (
                           <button
                             type="button"
-                            onClick={() => handleDeleteMonthlyReport(rep.reportId)}
-                            className="px-2 py-1 text-xs text-white bg-red-600 rounded cursor-pointer"
+                            onClick={() => setConfirmDeleteReportId(rep.reportId)}
+                            className="px-2.5 py-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded cursor-pointer"
                           >
-                            삭제 확인
+                            삭제
                           </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {editingReportId === rep.reportId && (
+                      <form
+                        onSubmit={handleSaveReportEdit}
+                        className="rounded-lg border border-[#D5DFEE] bg-[#F7F6F3] p-4 space-y-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-[#002968]">
+                            보고서 본문 편집 ({rep.reportId})
+                          </h4>
+                          <label className="inline-flex items-center gap-1.5 text-xs text-stone-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={reportDraft.isPublished}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({
+                                  ...prev,
+                                  isPublished: e.target.checked,
+                                }))
+                              }
+                            />
+                            공개 게시
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                              보고 월 표기 (최대 60자)
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              maxLength={60}
+                              value={reportDraft.monthLabel}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({ ...prev, monthLabel: e.target.value }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded bg-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                              대상 범위 설명 (최대 80자)
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              maxLength={80}
+                              value={reportDraft.periodRange}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({
+                                  ...prev,
+                                  periodRange: e.target.value,
+                                }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded bg-white"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                              01. 월간 분야별 연구 흐름 ({reportDraft.categoryFlows.length}/4000)
+                            </label>
+                            <textarea
+                              rows={4}
+                              required
+                              maxLength={4000}
+                              value={reportDraft.categoryFlows}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({
+                                  ...prev,
+                                  categoryFlows: e.target.value,
+                                }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded bg-white leading-relaxed"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                              02. 주목할 만한 논문 ({reportDraft.notablePapers.length}/3000)
+                            </label>
+                            <textarea
+                              rows={4}
+                              required
+                              maxLength={3000}
+                              value={reportDraft.notablePapers}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({
+                                  ...prev,
+                                  notablePapers: e.target.value,
+                                }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded bg-white leading-relaxed"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                              03. 주요 연구 주제 ({reportDraft.keyThemes.length}/2500)
+                            </label>
+                            <textarea
+                              rows={4}
+                              required
+                              maxLength={2500}
+                              value={reportDraft.keyThemes}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({ ...prev, keyThemes: e.target.value }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded bg-white leading-relaxed"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                              04. 공통적인 연구 결과 ({reportDraft.commonFindings.length}/2500)
+                            </label>
+                            <textarea
+                              rows={4}
+                              required
+                              maxLength={2500}
+                              value={reportDraft.commonFindings}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({
+                                  ...prev,
+                                  commonFindings: e.target.value,
+                                }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded bg-white leading-relaxed"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                              05. 연구 공백 및 후속 연구 과제 ({reportDraft.researchGaps.length}
+                              /2500)
+                            </label>
+                            <textarea
+                              rows={4}
+                              required
+                              maxLength={2500}
+                              value={reportDraft.researchGaps}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({
+                                  ...prev,
+                                  researchGaps: e.target.value,
+                                }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded bg-white leading-relaxed"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                              06. 청소년지도 현장에 대한 시사점 (
+                              {reportDraft.fieldImplications.length}/2500)
+                            </label>
+                            <textarea
+                              rows={4}
+                              required
+                              maxLength={2500}
+                              value={reportDraft.fieldImplications}
+                              onChange={(e) =>
+                                setReportDraft((prev) => ({
+                                  ...prev,
+                                  fieldImplications: e.target.value,
+                                }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded bg-white leading-relaxed"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-1">
                           <button
                             type="button"
-                            onClick={() => setConfirmDeleteReportId(null)}
-                            className="px-2 py-1 text-xs text-stone-500 cursor-pointer"
+                            onClick={() => setEditingReportId(null)}
+                            className="px-3 py-1.5 text-xs font-medium text-stone-600 bg-white border border-stone-300 rounded cursor-pointer"
                           >
                             취소
                           </button>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteReportId(rep.reportId)}
-                          className="px-2.5 py-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded cursor-pointer"
-                        >
-                          삭제
-                        </button>
-                      )}
-                    </div>
+                          <button
+                            type="submit"
+                            disabled={savingReportEdit}
+                            className="px-3.5 py-1.5 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded cursor-pointer"
+                          >
+                            {savingReportEdit ? '저장 중...' : '보고서 수정 저장'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
                   </div>
                 ))
               )}
@@ -2299,16 +2816,62 @@ export function AdminConsolePage({
 
           {/* Collection & Analysis Execution Logs */}
           <div className="rounded-lg border border-stone-200 bg-white overflow-hidden">
-            <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3]">
+            <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-stone-900">
-                자동 수집 · AI 분석 실행 및 오류 로그 (최근 {syncLogs.length}건)
+                자동 수집 · AI 분석 실행 및 오류 로그 ({filteredSyncLogs.length} / {syncLogs.length}건)
               </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="로그 상태 필터"
+                  value={syncLogStatusFilter}
+                  onChange={(e) =>
+                    setSyncLogStatusFilter(
+                      e.target.value as 'all' | 'success' | 'partial' | 'error'
+                    )
+                  }
+                  className="px-2.5 py-1 text-xs border border-stone-300 rounded bg-white text-stone-700"
+                >
+                  <option value="all">상태: 전체</option>
+                  <option value="success">정상 완료</option>
+                  <option value="partial">부분 오류</option>
+                  <option value="error">실행 오류</option>
+                </select>
+                <select
+                  aria-label="실행 유형 필터"
+                  value={syncLogTriggerFilter}
+                  onChange={(e) =>
+                    setSyncLogTriggerFilter(
+                      e.target.value as 'all' | 'scheduled_monthly' | 'manual' | 'retry_failed'
+                    )
+                  }
+                  className="px-2.5 py-1 text-xs border border-stone-300 rounded bg-white text-stone-700"
+                >
+                  <option value="all">유형: 전체</option>
+                  <option value="scheduled_monthly">월간 정기 자동</option>
+                  <option value="manual">수동 실행</option>
+                  <option value="retry_failed">실패 논문 재분석</option>
+                </select>
+                {filteredSyncLogs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleExportSyncLogs}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-stone-700 bg-white border border-stone-300 hover:bg-stone-50 rounded whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Download className="w-3 h-3" />
+                    JSON 저장
+                  </button>
+                )}
+              </div>
             </div>
             <div className="divide-y divide-stone-100 text-xs">
-              {syncLogs.length === 0 ? (
-                <p className="p-6 text-center text-stone-500">아직 기록된 실행 로그가 없습니다.</p>
+              {filteredSyncLogs.length === 0 ? (
+                <p className="p-6 text-center text-stone-500">
+                  {syncLogs.length === 0
+                    ? '아직 기록된 실행 로그가 없습니다.'
+                    : '선택한 필터 조건에 일치하는 실행 로그가 없습니다.'}
+                </p>
               ) : (
-                syncLogs.map((log) => (
+                filteredSyncLogs.map((log) => (
                   <div key={log.logId} className="p-4 space-y-1.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -2341,9 +2904,9 @@ export function AdminConsolePage({
                           ·
                         </span>
                         <span className="text-stone-600 tabular-nums">
-                          신규 {log.newPapersCount}편 (국내 {log.domesticCount} · 해외{' '}
-                          {log.internationalCount}) · AI 성공 {log.analyzedSuccessCount} / 실패{' '}
-                          {log.analyzedFailedCount}
+                          {log.triggerType === 'retry_failed'
+                            ? `재분석 대상 ${log.collectedCount}편 · AI 성공 ${log.analyzedSuccessCount} / 실패 ${log.analyzedFailedCount}`
+                            : `신규 ${log.newPapersCount}편 (국내 ${log.domesticCount} · 해외 ${log.internationalCount}) · AI 성공 ${log.analyzedSuccessCount} / 실패 ${log.analyzedFailedCount}`}
                         </span>
                       </div>
                       <span className="font-mono text-stone-500 tabular-nums">
@@ -2354,6 +2917,11 @@ export function AdminConsolePage({
                       API 호출: OpenAlex {log.openAlexCalls}회 · Crossref {log.crossrefCalls}회 ·
                       Gemini {log.geminiCalls}회 · 토큰 {log.estimatedTokens.toLocaleString()}
                     </p>
+                    {log.koreanCoverageNotice && (
+                      <p className="text-[11px] text-stone-600 bg-stone-50 border border-stone-200 rounded px-2.5 py-1.5">
+                        {log.koreanCoverageNotice}
+                      </p>
+                    )}
                     {(log.collectionErrors.length > 0 || log.analysisErrors.length > 0) && (
                       <div className="rounded bg-red-50 border border-red-100 p-2.5 text-[11px] text-red-800 space-y-0.5">
                         {log.collectionErrors.map((e, idx) => (
@@ -2375,12 +2943,12 @@ export function AdminConsolePage({
             <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-bold text-stone-900">
-                  국내외 학술정보 API 연동 현황 · 2단계 국회도서관 / 3단계 국립중앙도서관 검색 테스트
+                  국내외 학술정보 API 연동 현황 · 2단계 국회도서관 / 3단계 국립중앙도서관 / 4단계 OpenAlex·Crossref / 5단계 DBpia
                 </h3>
                 <p className="text-xs text-stone-600 mt-0.5">
                   인증키가 없는 서비스는 임의 데이터를 생성하지 않고 연결 준비 상태로 표시합니다.
                   {sourcesStatus?.koreanKeywords?.totalCount
-                    ? ` (국내 확장 검색어 ${sourcesStatus.koreanKeywords.totalCount}개 등록됨)`
+                    ? ` (한국어 확장 검색어 ${sourcesStatus.koreanKeywords.totalCount}개 · 해외 ${sourcesStatus.overseasKeywords?.length || 8}대 키워드 · 국내 KCI 청소년학 ${sourcesStatus.koreanJournals?.length || 6}종 학술지 적용)`
                     : ''}
                 </p>
               </div>
@@ -2615,7 +3183,368 @@ export function AdminConsolePage({
                   </div>
                 )}
               </div>
+
+              {/* Step 4: OpenAlex & Crossref Advanced Search Test */}
+              <div className="rounded-lg border border-stone-200 bg-[#F7F6F3] p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-bold text-stone-900">
+                      4단계: OpenAlex · Crossref 연결 고도화 실데이터 검색 테스트
+                    </p>
+                    <p className="text-[11px] text-stone-600 mt-0.5">
+                      학술지·출판사·기관·국가코드·DOI 접두어 기반 국내외 판정, 한국어 30개 확장 검색어, 초기 5년(60개월) 수집을 검증합니다.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+                  <div className="flex-1 flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="4단계 국내외 범위 선택"
+                      value={globalRegionScope}
+                      onChange={(e) =>
+                        setGlobalRegionScope(e.target.value as 'all' | 'domestic' | 'international')
+                      }
+                      className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-md bg-white text-stone-700"
+                    >
+                      <option value="all">국내 · 해외 전체</option>
+                      <option value="domestic">국내 논문만 (학술지·출판사·DOI 판정)</option>
+                      <option value="international">해외 논문만</option>
+                    </select>
+                    <select
+                      aria-label="4단계 수집 기간 선택"
+                      value={globalLookback}
+                      onChange={(e) =>
+                        setGlobalLookback(Number(e.target.value) as 3 | 12 | 60)
+                      }
+                      className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-md bg-white text-stone-700"
+                    >
+                      <option value={60}>초기 5년 (60개월)</option>
+                      <option value={12}>정기 12개월</option>
+                      <option value={3}>최근 3개월</option>
+                    </select>
+                    <select
+                      aria-label="4단계 확장 검색어 프리셋 선택"
+                      value={
+                        sourcesStatus?.koreanKeywords?.core?.includes(globalQuery) ||
+                        sourcesStatus?.koreanKeywords?.extended?.includes(globalQuery) ||
+                        sourcesStatus?.overseasKeywords?.includes(globalQuery)
+                          ? globalQuery
+                          : ''
+                      }
+                      onChange={(e) => {
+                        if (e.target.value) setGlobalQuery(e.target.value);
+                      }}
+                      className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-md bg-white text-stone-700"
+                    >
+                      <option value="">검색어 프리셋 (국내 30 + 해외 8)</option>
+                      {(sourcesStatus?.koreanKeywords?.core || []).map((kw) => (
+                        <option key={`gl_core_${kw}`} value={kw}>
+                          [국내 핵심] {kw}
+                        </option>
+                      ))}
+                      {(sourcesStatus?.koreanKeywords?.extended || []).map((kw) => (
+                        <option key={`gl_ext_${kw}`} value={kw}>
+                          [국내 확장] {kw}
+                        </option>
+                      ))}
+                      {(sourcesStatus?.overseasKeywords || []).map((kw) => (
+                        <option key={`gl_en_${kw}`} value={kw}>
+                          [해외 8대] {kw}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={globalQuery}
+                      onChange={(e) => setGlobalQuery(e.target.value)}
+                      placeholder="검색어 입력 (예: 청소년지도 또는 Youth Leadership)"
+                      className="flex-1 min-w-[180px] px-3 py-1.5 text-xs border border-stone-300 rounded-md bg-white focus:outline-none focus:border-[#002968]"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGlobalSearchTest}
+                    disabled={globalTesting}
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    {globalTesting ? '연계 검색 중...' : 'OpenAlex · Crossref 고도화 테스트'}
+                  </button>
+                </div>
+
+                {globalTestResult && (
+                  <div
+                    className={`rounded-md border p-3 text-xs space-y-2 ${
+                      globalTestResult.ok
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                        : 'bg-red-50 border-red-200 text-red-900'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold">{globalTestResult.message}</p>
+                      {globalTestResult.fromDate && globalTestResult.toDate && (
+                        <span className="font-mono text-[11px] text-stone-600 tabular-nums">
+                          {globalTestResult.fromDate} ~ {globalTestResult.toDate}
+                        </span>
+                      )}
+                    </div>
+                    {globalTestResult.openAlexNote && (
+                      <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+                        {globalTestResult.openAlexNote}
+                      </p>
+                    )}
+                    {globalTestResult.papers.length > 0 && (
+                      <ul className="space-y-2 pt-1 border-t border-emerald-200/70">
+                        {globalTestResult.papers.slice(0, 8).map((item) => (
+                          <li key={item.paperId} className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 space-y-0.5">
+                              <p className="font-medium text-stone-900 truncate">
+                                <span
+                                  className={`mr-1.5 font-semibold ${
+                                    item.region === 'domestic'
+                                      ? 'text-[#002968]'
+                                      : 'text-stone-600'
+                                  }`}
+                                >
+                                  [{item.region === 'domestic' ? '국내' : '해외'}]
+                                </span>
+                                {item.title}
+                              </p>
+                              <p className="text-[11px] text-stone-600 truncate">
+                                {item.authors.join(', ')} · {item.journalName}
+                                {item.publisher ? ` (${item.publisher})` : ''} ·{' '}
+                                {item.publicationDate || '발행일 미상'} · {item.source}
+                              </p>
+                              <p className="text-[11px] text-emerald-900/90 truncate">
+                                판정 근거: {item.regionReason}
+                              </p>
+                            </div>
+                            {item.paperUrl && (
+                              <a
+                                href={item.paperUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[11px] font-semibold text-[#002968] hover:underline whitespace-nowrap shrink-0"
+                              >
+                                원문 확인
+                              </a>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 5: DBpia Open API Live Search Test (Search-Only & Link-Out) */}
+              <div className="rounded-lg border border-stone-200 bg-[#F7F6F3] p-4 space-y-3">
+                <div>
+                  <p className="text-xs font-bold text-stone-900">
+                    5단계: DBpia Open API 실시간 검색 테스트 (약관 준수: 미저장 · 원문 링크 연결 전용)
+                  </p>
+                  <p className="text-[11px] text-stone-600 mt-0.5">
+                    DBpia 약관에 따라 DB 영구 저장 및 AI 요약에 활용하지 않고, 실시간 메타데이터 조회 및 DBpia 원문 페이지 이동 링크만 제공합니다.
+                  </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <div className="flex-1 flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="DBpia 정렬 기준"
+                      value={dbpiaSortType}
+                      onChange={(e) => setDbpiaSortType(e.target.value as '2' | '1')}
+                      className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-md bg-white text-stone-700"
+                    >
+                      <option value="2">최신 발행순</option>
+                      <option value="1">정확도순</option>
+                    </select>
+                    <select
+                      aria-label="DBpia 한국어 검색어 프리셋"
+                      value={
+                        sourcesStatus?.koreanKeywords?.core?.includes(dbpiaQuery) ||
+                        sourcesStatus?.koreanKeywords?.extended?.includes(dbpiaQuery)
+                          ? dbpiaQuery
+                          : ''
+                      }
+                      onChange={(e) => {
+                        if (e.target.value) setDbpiaQuery(e.target.value);
+                      }}
+                      className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-md bg-white text-stone-700"
+                    >
+                      <option value="">검색어 프리셋 (30개)</option>
+                      {(sourcesStatus?.koreanKeywords?.core || []).map((kw) => (
+                        <option key={`dbpia_core_${kw}`} value={kw}>
+                          [핵심] {kw}
+                        </option>
+                      ))}
+                      {(sourcesStatus?.koreanKeywords?.extended || []).map((kw) => (
+                        <option key={`dbpia_ext_${kw}`} value={kw}>
+                          [확장] {kw}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={dbpiaQuery}
+                      onChange={(e) => setDbpiaQuery(e.target.value)}
+                      placeholder="DBpia 실시간 검색어 (예: 청소년지도)"
+                      className="flex-1 min-w-[180px] px-3 py-1.5 text-xs border border-stone-300 rounded-md bg-white focus:outline-none focus:border-[#002968]"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDbpiaSearchTest}
+                    disabled={dbpiaTesting}
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    {dbpiaTesting ? '실시간 검색 중...' : 'DBpia 실데이터 검색 테스트'}
+                  </button>
+                </div>
+
+                {dbpiaTestResult && (
+                  <div
+                    className={`rounded-md border p-3 text-xs space-y-2 ${
+                      dbpiaTestResult.ok
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                        : dbpiaTestResult.status === 'ready_needs_key'
+                          ? 'bg-amber-50 border-amber-200 text-amber-950'
+                          : 'bg-red-50 border-red-200 text-red-900'
+                    }`}
+                  >
+                    <p className="font-semibold">{dbpiaTestResult.message}</p>
+                    {dbpiaTestResult.papers.length > 0 && (
+                      <ul className="space-y-1.5 pt-1 border-t border-emerald-200/70">
+                        {dbpiaTestResult.papers.slice(0, 5).map((item) => (
+                          <li key={item.sourceId} className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-medium text-stone-900 truncate">{item.title}</p>
+                              <p className="text-[11px] text-stone-600 truncate">
+                                {item.authors.join(', ')} · {item.journalName}
+                                {item.publisherName ? ` (${item.publisherName})` : ''} ·{' '}
+                                {item.publicationDate || '발행일 미상'}
+                                {item.freeYn === 'Y' ? ' · 무료열람 가능' : ''}
+                              </p>
+                            </div>
+                            <a
+                              href={item.paperUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-semibold text-[#002968] hover:underline whitespace-nowrap shrink-0"
+                            >
+                              DBpia 원문
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
+          </div>
+
+          {/* Integrated Security, Firebase, API & Scheduler Readiness Diagnostics */}
+          <div className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b border-stone-200 bg-[#F7F6F3] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-stone-900 flex items-center gap-1.5">
+                  <Shield className="w-4 h-4 text-[#002968]" />
+                  통합 보안 · Firebase · 학술 API · 스케줄러 운영 점검
+                </h3>
+                <p className="text-xs text-stone-600 mt-0.5">
+                  인증·RBAC, Firestore 서버 직접 연결, Express/Gemini 서버 상태, OpenAlex·Crossref 실시간 조회, KST 03:00 스케줄 경계를 1회 클릭으로 검증합니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRunSystemDiagnostics}
+                disabled={diagnosticsRunning}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#002968] hover:bg-[#001f4f] disabled:opacity-60 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${diagnosticsRunning ? 'animate-spin' : ''}`} />
+                {diagnosticsRunning ? '통합 진단 실행 중...' : '전체 시스템 통합 진단 실행'}
+              </button>
+            </div>
+
+            {diagnosticsReport ? (
+              <div className="divide-y divide-stone-100">
+                <div className="px-4 py-2.5 bg-stone-50/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-stone-800">
+                    종합 결과:{' '}
+                    <span
+                      className={
+                        diagnosticsReport.overallStatus === 'pass'
+                          ? 'text-emerald-700'
+                          : diagnosticsReport.overallStatus === 'warn'
+                            ? 'text-amber-700'
+                            : 'text-red-700'
+                      }
+                    >
+                      {diagnosticsReport.overallStatus === 'pass'
+                        ? '정상 (전체 통과)'
+                        : diagnosticsReport.overallStatus === 'warn'
+                          ? '양호 (선택 구성 또는 대기 항목 확인)'
+                          : '점검 필요 (일부 실패)'}
+                    </span>
+                  </span>
+                  <span className="font-mono text-[11px] text-stone-500 tabular-nums">
+                    점검 시각: {new Date(diagnosticsReport.checkedAtIso).toLocaleString('ko-KR')}
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[680px] text-xs">
+                    <thead>
+                      <tr className="border-b border-stone-200 bg-white text-stone-500 font-semibold">
+                        <th className="py-2.5 px-4">점검 항목</th>
+                        <th className="py-2.5 px-3">판정</th>
+                        <th className="py-2.5 px-3">응답 시간</th>
+                        <th className="py-2.5 px-4">진단 결과 및 세부 설명</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {diagnosticsReport.checks.map((item) => (
+                        <tr key={item.id} className="hover:bg-[#F7F6F3]/60">
+                          <td className="py-3 px-4 font-semibold text-stone-900 whitespace-nowrap">
+                            {item.label}
+                          </td>
+                          <td className="py-3 px-3 whitespace-nowrap font-semibold">
+                            <span
+                              className={
+                                item.status === 'pass'
+                                  ? 'text-emerald-700'
+                                  : item.status === 'warn'
+                                    ? 'text-amber-700'
+                                    : 'text-red-700'
+                              }
+                            >
+                              {item.status === 'pass'
+                                ? '통과'
+                                : item.status === 'warn'
+                                  ? '주의'
+                                  : '실패'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 whitespace-nowrap font-mono text-stone-600 tabular-nums">
+                            {item.latencyMs} ms
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="font-medium text-stone-900">{item.summary}</p>
+                            <p className="text-[11px] text-stone-500 mt-0.5">{item.detail}</p>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="p-6 text-center text-xs text-stone-500">
+                [전체 시스템 통합 진단 실행] 버튼을 누르면 Firebase 서버 연결, Gemini API 키 구성, 학술 API 실시간 응답, KST 스케줄 경계를 실시간으로 검증합니다.
+              </div>
+            )}
           </div>
         </section>
       )}

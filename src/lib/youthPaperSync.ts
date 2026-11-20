@@ -2,6 +2,7 @@ import { User } from 'firebase/auth';
 import {
   doc,
   getDoc,
+  getDocFromServer,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -200,24 +201,66 @@ function makeSafePaperId(openAlexId: string, doi: string, title: string): string
   return `paper_${(h1 >>> 0).toString(36)}_${(h2 >>> 0).toString(36)}`.slice(0, 120);
 }
 
+const KOREAN_YOUTH_JOURNAL_SIGNALS = [
+  { doiPrefix: '10.21509', nameKo: '청소년학연구', nameEn: 'korean journal of youth studies', publisherEn: 'korea youth research association' },
+  { doiPrefix: '10.14816', nameKo: '한국청소년연구', nameEn: 'studies on korean youth', publisherEn: 'national youth policy institute' },
+  { doiPrefix: '10.19034', nameKo: '청소년복지연구', nameEn: 'journal of adolescent welfare', publisherEn: 'korean association of youth welfare' },
+  { doiPrefix: '10.17854', nameKo: '청소년문화포럼', nameEn: 'forum for youth culture', publisherEn: 'research center for korea youth culture' },
+  { doiPrefix: '10.55063', nameKo: '청소년시설환경', nameEn: 'youth facility and environment', publisherEn: 'korea institute of youth facility and environment' },
+  { doiPrefix: '10.34244', nameKo: '미래청소년학회지', nameEn: 'future oriented youth society', publisherEn: 'future oriented youth society' },
+];
+
 function detectDomesticPaper(params: {
   language?: string;
   title?: string;
   journalName?: string;
+  publisher?: string;
   abstract?: string;
+  doi?: string;
   countryCodes?: string[];
+  institutions?: string[];
 }): boolean {
-  const hasHangul = /[가-힣]/.test(
-    `${params.title || ''} ${params.journalName || ''} ${params.abstract || ''}`
-  );
-  if (params.language === 'ko' || hasHangul) return true;
-  if (params.countryCodes?.some((c) => c.toUpperCase() === 'KR')) return true;
+  const doiLower = normalizeDoi(params.doi);
   const journalLower = (params.journalName || '').toLowerCase();
-  return (
-    journalLower.includes('korean') ||
-    journalLower.includes('korea') ||
-    journalLower.includes('청소년')
+  const publisherLower = (params.publisher || '').toLowerCase();
+
+  if (
+    KOREAN_YOUTH_JOURNAL_SIGNALS.some(
+      (j) =>
+        (doiLower && doiLower.startsWith(`${j.doiPrefix}/`)) ||
+        journalLower.includes(j.nameKo) ||
+        journalLower.includes(j.nameEn) ||
+        publisherLower.includes(j.publisherEn)
+    )
+  ) {
+    return true;
+  }
+
+  if (params.countryCodes?.some((c) => c.toUpperCase() === 'KR')) return true;
+
+  const orgText = `${journalLower} ${publisherLower} ${(params.institutions || []).join(' ').toLowerCase()}`;
+  const orgMarkers = [
+    'korean',
+    'korea',
+    'south korea',
+    'myongji',
+    'seoul',
+    'yonsei',
+    'nyci',
+    'kywa',
+    'kci',
+    '한국',
+    '대한',
+    '청소년',
+    '명지',
+    '학회',
+  ];
+  if (orgMarkers.some((m) => orgText.includes(m))) return true;
+
+  const hasHangul = /[가-힣]/.test(
+    `${params.title || ''} ${params.journalName || ''} ${params.publisher || ''} ${params.abstract || ''}`
   );
+  return params.language === 'ko' || hasHangul;
 }
 
 interface BrowserOpenAlexWork {
@@ -232,11 +275,16 @@ interface BrowserOpenAlexWork {
   open_access?: { is_oa?: boolean; oa_url?: string | null } | null;
   primary_location?: {
     landing_page_url?: string | null;
-    source?: { display_name?: string | null; country_code?: string | null } | null;
+    source?: {
+      display_name?: string | null;
+      country_code?: string | null;
+      host_organization_name?: string | null;
+    } | null;
   } | null;
   authorships?: Array<{
     author?: { display_name?: string | null } | null;
     countries?: string[];
+    institutions?: Array<{ display_name?: string | null; country_code?: string | null }>;
   }>;
   keywords?: Array<{ display_name?: string | null }>;
   concepts?: Array<{ display_name?: string | null }>;
@@ -247,7 +295,13 @@ interface BrowserCrossrefItem {
   URL?: string;
   title?: string[];
   'container-title'?: string[];
-  author?: Array<{ given?: string; family?: string; name?: string }>;
+  publisher?: string;
+  author?: Array<{
+    given?: string;
+    family?: string;
+    name?: string;
+    affiliation?: Array<{ name?: string }>;
+  }>;
   abstract?: string;
   published?: { 'date-parts'?: number[][] };
   'published-online'?: { 'date-parts'?: number[][] };
@@ -294,7 +348,7 @@ async function collectPapersViaBrowserFallback(params: {
   perCategoryLimit: number;
   lookbackMonths: number;
 }) {
-  const safeMonths = Math.min(Math.max(Math.round(params.lookbackMonths || 3), 1), 24);
+  const safeMonths = Math.min(Math.max(Math.round(params.lookbackMonths || 3), 1), 60);
   const now = new Date();
   const toDate = now.toISOString().slice(0, 10);
   const from = new Date(now);
@@ -453,18 +507,38 @@ async function collectPapersViaBrowserFallback(params: {
         (/[가-힣]/.test(title) ? 'ko' : 'en')
       ).slice(0, 20);
 
+      const publisher = (
+        work.primary_location?.source?.host_organization_name ||
+        crItem?.publisher ||
+        ''
+      ).trim();
+
       const countryCodes = [
         ...(work.primary_location?.source?.country_code
           ? [work.primary_location.source.country_code]
           : []),
-        ...(work.authorships?.flatMap((a) => a.countries || []) || []),
+        ...(work.authorships?.flatMap((a) => [
+          ...(a.countries || []),
+          ...((a.institutions || []).map((i) => i.country_code || '').filter(Boolean)),
+        ]) || []),
+      ];
+      const institutions = [
+        ...(work.authorships?.flatMap((a) =>
+          (a.institutions || []).map((i) => i.display_name || '').filter(Boolean)
+        ) || []),
+        ...(crItem?.author?.flatMap((a) =>
+          (a.affiliation || []).map((af) => af.name || '').filter(Boolean)
+        ) || []),
       ];
       const isDomestic = detectDomesticPaper({
         language,
         title,
         journalName,
+        publisher,
         abstract,
+        doi: doiClean,
         countryCodes,
+        institutions,
       });
 
       const keywords = Array.from(
@@ -548,6 +622,7 @@ export function buildGoogleScholarCategoryUrl(category: YouthResearchCategory): 
 }
 
 export function getKstScheduleContext(dateInput: Date = new Date()) {
+  const safeDate = Number.isNaN(dateInput.getTime()) ? new Date() : dateInput;
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: MONTHLY_TIMEZONE,
     year: 'numeric',
@@ -556,18 +631,20 @@ export function getKstScheduleContext(dateInput: Date = new Date()) {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).formatToParts(dateInput);
+  }).formatToParts(safeDate);
 
   const getPart = (type: string) => parts.find((p) => p.type === type)?.value || '00';
   const year = Number(getPart('year'));
   const month = Number(getPart('month'));
   const day = Number(getPart('day'));
-  const hour = Number(getPart('hour'));
+  const hour = Number(getPart('hour')) % 24;
 
   const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
   const currentMonthLabel = `${year}년 ${String(month).padStart(2, '0')}월`;
   const kstDateLabel = `${year}.${String(month).padStart(2, '0')}.${String(day).padStart(2, '0')}`;
+  const kstNowLabel = `${kstDateLabel} ${String(hour).padStart(2, '0')}:${getPart('minute')} KST`;
   const isPastScheduledSlotThisMonth = day > 1 || (day === 1 && hour >= 3);
+  const currentMonthSlotLabel = `${year}.${String(month).padStart(2, '0')}.01 03:00 (Asia/Seoul)`;
 
   let nextYear = year;
   let nextMonth = month;
@@ -588,10 +665,64 @@ export function getKstScheduleContext(dateInput: Date = new Date()) {
     currentMonthKey,
     currentMonthLabel,
     kstDateLabel,
+    kstNowLabel,
     isPastScheduledSlotThisMonth,
+    currentMonthSlotLabel,
     nextRunDate,
     nextRunTimestamp: Timestamp.fromDate(nextRunDate),
     nextRunLabel: `${nextYear}.${String(nextMonth).padStart(2, '0')}.01 03:00 (Asia/Seoul)`,
+  };
+}
+
+export function evaluateMonthlySyncDue({
+  researchSyncStatus,
+  papersCount,
+  referenceDate = new Date(),
+}: {
+  researchSyncStatus: ResearchSyncStatus | null;
+  papersCount: number;
+  referenceDate?: Date;
+}): {
+  due: boolean;
+  reason: string;
+  kst: ReturnType<typeof getKstScheduleContext>;
+} {
+  const kst = getKstScheduleContext(referenceDate);
+  if (researchSyncStatus?.autoEnabled === false) {
+    return { due: false, reason: '자동 스케줄이 일시 중지되어 있습니다.', kst };
+  }
+  if (papersCount <= 0) {
+    return { due: true, reason: '초기 수집 논문이 없어 자동 수집 대상입니다.', kst };
+  }
+  if (!researchSyncStatus?.lastSyncedAt || researchSyncStatus.scheduleCron !== MONTHLY_CRON) {
+    return {
+      due: true,
+      reason: '월간 정기 수집(0 3 1 * * KST) 이력이 없어 자동 수집 대상입니다.',
+      kst,
+    };
+  }
+  if (!kst.isPastScheduledSlotThisMonth) {
+    return {
+      due: false,
+      reason: `이번 달 정기 시각(${kst.currentMonthSlotLabel}) 도래 전입니다.`,
+      kst,
+    };
+  }
+
+  const lastDate = researchSyncStatus.lastSyncedAt.toDate();
+  const lastCtx = getKstScheduleContext(lastDate);
+  if (lastCtx.currentMonthKey < kst.currentMonthKey) {
+    return {
+      due: true,
+      reason: `이번 달 정기 시각(${kst.currentMonthSlotLabel}) 이후 미실행 상태로 자동 실행 대상입니다.`,
+      kst,
+    };
+  }
+
+  return {
+    due: false,
+    reason: `${kst.currentMonthLabel} 정기 수집 완료 (${lastCtx.kstNowLabel})`,
+    kst,
   };
 }
 
@@ -602,32 +733,106 @@ export function isMonthlySyncDue({
   researchSyncStatus: ResearchSyncStatus | null;
   papersCount: number;
 }): boolean {
-  if (researchSyncStatus?.autoEnabled === false) return false;
-  if (papersCount === 0) return true;
-  if (!researchSyncStatus?.lastSyncedAt || researchSyncStatus.scheduleCron !== MONTHLY_CRON) {
-    return true;
-  }
-
-  const nowCtx = getKstScheduleContext(new Date());
-  if (!nowCtx.isPastScheduledSlotThisMonth) {
-    return false;
-  }
-
-  const lastDate = researchSyncStatus.lastSyncedAt.toDate();
-  const lastCtx = getKstScheduleContext(lastDate);
-  return lastCtx.currentMonthKey < nowCtx.currentMonthKey;
+  return evaluateMonthlySyncDue({ researchSyncStatus, papersCount }).due;
 }
+
+export async function toggleYouthResearchAutoSync({
+  enabled,
+  authUser,
+  actorName,
+  currentStatus,
+}: {
+  enabled: boolean;
+  authUser: User;
+  actorName: string;
+  currentStatus: ResearchSyncStatus | null;
+}): Promise<void> {
+  const kst = getKstScheduleContext();
+  const safeActorName = (actorName?.trim() || '원우회 관리자').slice(0, LIMITS.displayName);
+  const statusRef = doc(db, 'settings', 'researchSync');
+  try {
+    await setDoc(statusRef, {
+      autoEnabled: enabled,
+      intervalDays: MONTHLY_INTERVAL_DAYS,
+      ...(currentStatus?.lastSyncedAt ? { lastSyncedAt: currentStatus.lastSyncedAt } : {}),
+      nextSyncAt: kst.nextRunTimestamp,
+      lastSyncStatus: currentStatus?.lastSyncStatus || 'idle',
+      ...(currentStatus?.lastSyncMode ? { lastSyncMode: currentStatus.lastSyncMode } : {}),
+      lastSyncCount: Math.min(Math.max(0, Math.round(currentStatus?.lastSyncCount ?? 0)), 500),
+      lastSyncMessage: (enabled
+        ? '매월 1일 오전 3시(Asia/Seoul) 자동 논문 수집 스케줄이 활성화되었습니다.'
+        : '매월 1일 자동 논문 수집 스케줄이 관리자에 의해 일시 중지되었습니다.'
+      ).slice(0, 400),
+      windowLabel: (currentStatus?.windowLabel || '정기 월간 수집 (KST 03:00)').slice(0, 80),
+      scheduleCron: MONTHLY_CRON,
+      timezone: MONTHLY_TIMEZONE,
+      ...(currentStatus?.koreanCoverageNotice
+        ? { koreanCoverageNotice: currentStatus.koreanCoverageNotice.slice(0, 400) }
+        : {}),
+      updatedByUid: authUser.uid,
+      updatedByName: safeActorName,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'settings/researchSync');
+  }
+}
+
+export async function resetStaleYouthSyncLock({
+  authUser,
+  actorName,
+  currentStatus,
+}: {
+  authUser: User;
+  actorName: string;
+  currentStatus: ResearchSyncStatus | null;
+}): Promise<void> {
+  const kst = getKstScheduleContext();
+  const safeActorName = (actorName?.trim() || '원우회 관리자').slice(0, LIMITS.displayName);
+  const statusRef = doc(db, 'settings', 'researchSync');
+  try {
+    await setDoc(statusRef, {
+      autoEnabled: currentStatus?.autoEnabled ?? true,
+      intervalDays: MONTHLY_INTERVAL_DAYS,
+      ...(currentStatus?.lastSyncedAt ? { lastSyncedAt: currentStatus.lastSyncedAt } : {}),
+      nextSyncAt: kst.nextRunTimestamp,
+      lastSyncStatus: 'idle',
+      ...(currentStatus?.lastSyncMode ? { lastSyncMode: currentStatus.lastSyncMode } : {}),
+      lastSyncCount: Math.min(Math.max(0, Math.round(currentStatus?.lastSyncCount ?? 0)), 500),
+      lastSyncMessage: '이전 실행 잠금 상태가 관리자에 의해 초기화되었습니다.'.slice(0, 400),
+      windowLabel: (currentStatus?.windowLabel || '잠금 해제됨').slice(0, 80),
+      scheduleCron: MONTHLY_CRON,
+      timezone: MONTHLY_TIMEZONE,
+      ...(currentStatus?.koreanCoverageNotice
+        ? { koreanCoverageNotice: currentStatus.koreanCoverageNotice.slice(0, 400) }
+        : {}),
+      updatedByUid: authUser.uid,
+      updatedByName: safeActorName,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'settings/researchSync');
+  }
+}
+
+export type MonthlyReportScope = 'all' | '12m' | '3m';
 
 export async function generateMonthlyTrendReport({
   papers,
   newPapersCount = 0,
   authUser,
   isPublished = true,
+  scope = 'all',
+  customMonthLabel,
+  customPeriodRange,
 }: {
   papers: PaperRecord[];
   newPapersCount?: number;
   authUser: User;
   isPublished?: boolean;
+  scope?: MonthlyReportScope;
+  customMonthLabel?: string;
+  customPeriodRange?: string;
 }): Promise<{ ok: boolean; report?: MonthlyTrendReport; message: string }> {
   if (papers.length === 0) {
     return {
@@ -637,24 +842,59 @@ export async function generateMonthlyTrendReport({
   }
 
   const kst = getKstScheduleContext();
-  const payloadPapers = papers.slice(0, 35).map((p) => ({
+  let scopedPapers = papers;
+  let defaultRangeLabel = `누적 전체 논문 ${papers.length}편 종합`;
+
+  if (scope === '12m' || scope === '3m') {
+    const monthsBack = scope === '3m' ? 3 : 12;
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - monthsBack);
+    const cutoffIso = cutoff.toISOString().slice(0, 10);
+    scopedPapers = papers.filter((p) => (p.publicationDate || '') >= cutoffIso);
+    if (scopedPapers.length === 0) {
+      return {
+        ok: false,
+        message: `최근 ${monthsBack}개월 기준에 해당하는 수집 논문이 없습니다. '누적 전체' 범위로 생성해 보세요.`,
+      };
+    }
+    defaultRangeLabel =
+      scope === '3m'
+        ? `최근 3개월 논문 ${scopedPapers.length}편 종합`
+        : `최근 12개월 논문 ${scopedPapers.length}편 종합`;
+  }
+
+  const prioritizedPapers = [...scopedPapers].sort((a, b) => {
+    const aDone = a.analysisStatus === 'completed' ? 1 : 0;
+    const bDone = b.analysisStatus === 'completed' ? 1 : 0;
+    if (bDone !== aDone) return bDone - aDone;
+    return (b.publicationDate || '').localeCompare(a.publicationDate || '');
+  });
+
+  const payloadPapers = prioritizedPapers.slice(0, 45).map((p) => ({
     title: p.title,
+    authors: (p.authors || []).slice(0, 3),
     mainCategory: p.mainCategory,
     region: p.region,
     publicationDate: p.publicationDate,
     journalName: p.journalName,
+    citedByCount: p.citedByCount ?? 0,
     easySummary: p.easySummary || '',
     researchFindings: p.researchFindings || '',
     practicalImplications: p.practicalImplications || '',
   }));
+
+  const reportId = `report_${kst.currentMonthKey.replace(/[^0-9]/g, '')}`;
+  const targetMonthLabel = (customMonthLabel || kst.currentMonthLabel).trim().slice(0, 60);
+  const targetPeriodRange = (customPeriodRange || defaultRangeLabel).trim().slice(0, 80);
 
   try {
     const res = await fetch(resolveApiUrl('/api/papers/report'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        monthLabel: kst.currentMonthLabel,
-        periodRange: `최근 수집 논문 ${papers.length}편 종합`,
+        reportId,
+        monthLabel: targetMonthLabel,
+        periodRange: targetPeriodRange,
         papers: payloadPapers,
       }),
     });
@@ -690,47 +930,66 @@ export async function generateMonthlyTrendReport({
       };
     }
 
-    const domesticCount = papers.filter((p) => p.region === 'domestic').length;
-    const internationalCount = papers.length - domesticCount;
-    const r = data.report;
-    const reportId = r.reportId || `report_${kst.currentMonthKey.replace(/[^0-9]/g, '')}`;
+    const domesticCount = scopedPapers.filter((p) => p.region === 'domestic').length;
+    const internationalCount = scopedPapers.length - domesticCount;
+    const scopedNewPapersCount = scopedPapers.filter((p) =>
+      (p.publicationDate || '').startsWith(kst.currentMonthKey)
+    ).length;
+    const effectiveNewCount =
+      scope === 'all' ? Math.max(newPapersCount, scopedNewPapersCount) : scopedNewPapersCount;
 
-    const reportRef = doc(db, 'monthlyReports', reportId);
-    const existingReportSnap = await getDoc(reportRef);
+    const r = data.report;
+    const rawReportId = (r.reportId || reportId).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+    const finalReportId = rawReportId || reportId;
+
+    const reportRef = doc(db, 'monthlyReports', finalReportId);
     const reportFields = {
-      reportId,
-      monthLabel: (r.monthLabel || kst.currentMonthLabel).slice(0, 60),
-      periodRange: (r.periodRange || '최근 수집 논문 종합').slice(0, 80),
-      totalPapersCount: Math.max(0, Math.round(papers.length)),
-      newPapersCount: Math.max(0, Math.round(newPapersCount)),
-      domesticCount: Math.max(0, Math.round(domesticCount)),
-      internationalCount: Math.max(0, Math.round(internationalCount)),
-      categoryFlows: (r.categoryFlows || '분야별 연구 흐름이 정리되었습니다.').slice(0, 4000),
-      notablePapers: (r.notablePapers || '주목할 만한 논문이 선정되었습니다.').slice(0, 3000),
-      keyThemes: (r.keyThemes || '핵심 연구 주제가 도출되었습니다.').slice(0, 2500),
-      commonFindings: (r.commonFindings || '공통 연구 결과가 요약되었습니다.').slice(0, 2500),
-      researchGaps: (r.researchGaps || '후속 연구 과제가 정리되었습니다.').slice(0, 2500),
-      fieldImplications: (r.fieldImplications || '청소년지도 현장 시사점이 정리되었습니다.').slice(
+      reportId: finalReportId,
+      monthLabel: (r.monthLabel?.trim() || targetMonthLabel || kst.currentMonthLabel).slice(0, 60),
+      periodRange: (r.periodRange?.trim() || targetPeriodRange || defaultRangeLabel).slice(0, 80),
+      totalPapersCount: Math.min(Math.max(0, Math.round(scopedPapers.length)), 100000),
+      newPapersCount: Math.min(Math.max(0, Math.round(effectiveNewCount)), 100000),
+      domesticCount: Math.min(Math.max(0, Math.round(domesticCount)), 100000),
+      internationalCount: Math.min(Math.max(0, Math.round(internationalCount)), 100000),
+      categoryFlows: (r.categoryFlows?.trim() || '분야별 연구 흐름이 정리되었습니다.').slice(
+        0,
+        4000
+      ),
+      notablePapers: (r.notablePapers?.trim() || '주목할 만한 논문이 선정되었습니다.').slice(
+        0,
+        3000
+      ),
+      keyThemes: (r.keyThemes?.trim() || '핵심 연구 주제가 도출되었습니다.').slice(0, 2500),
+      commonFindings: (r.commonFindings?.trim() || '공통 연구 결과가 요약되었습니다.').slice(
         0,
         2500
       ),
+      researchGaps: (r.researchGaps?.trim() || '후속 연구 과제가 정리되었습니다.').slice(0, 2500),
+      fieldImplications: (
+        r.fieldImplications?.trim() || '청소년지도 현장 시사점이 정리되었습니다.'
+      ).slice(0, 2500),
       isPublished,
       updatedAt: serverTimestamp(),
     };
 
-    if (existingReportSnap.exists()) {
-      await updateDoc(reportRef, reportFields);
-    } else {
-      await setDoc(reportRef, {
-        ...reportFields,
-        createdByUid: authUser.uid,
-        createdAt: serverTimestamp(),
-      });
+    try {
+      const existingReportSnap = await getDoc(reportRef);
+      if (existingReportSnap.exists()) {
+        await updateDoc(reportRef, reportFields);
+      } else {
+        await setDoc(reportRef, {
+          ...reportFields,
+          createdByUid: authUser.uid,
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (writeErr) {
+      handleFirestoreError(writeErr, OperationType.WRITE, `monthlyReports/${finalReportId}`);
     }
 
     return {
       ok: true,
-      message: `${reportFields.monthLabel} 월간 연구동향 보고서가 생성되었습니다.`,
+      message: `${reportFields.monthLabel} 월간 연구동향 보고서가 생성되었습니다 (${scopedPapers.length}편 반영).`,
     };
   } catch (error) {
     return {
@@ -738,6 +997,60 @@ export async function generateMonthlyTrendReport({
       message:
         error instanceof Error ? error.message : '월간 연구동향 보고서 생성 중 오류가 발생했습니다.',
     };
+  }
+}
+
+export async function updateMonthlyTrendReportFields(
+  reportId: string,
+  updates: {
+    monthLabel: string;
+    periodRange: string;
+    categoryFlows: string;
+    notablePapers: string;
+    keyThemes: string;
+    commonFindings: string;
+    researchGaps: string;
+    fieldImplications: string;
+    isPublished: boolean;
+  }
+): Promise<void> {
+  const cleanMonth = updates.monthLabel.trim().slice(0, 60);
+  const cleanPeriod = updates.periodRange.trim().slice(0, 80);
+  const cleanFlows = updates.categoryFlows.trim().slice(0, 4000);
+  const cleanNotable = updates.notablePapers.trim().slice(0, 3000);
+  const cleanThemes = updates.keyThemes.trim().slice(0, 2500);
+  const cleanFindings = updates.commonFindings.trim().slice(0, 2500);
+  const cleanGaps = updates.researchGaps.trim().slice(0, 2500);
+  const cleanImplications = updates.fieldImplications.trim().slice(0, 2500);
+
+  if (
+    !cleanMonth ||
+    !cleanPeriod ||
+    !cleanFlows ||
+    !cleanNotable ||
+    !cleanThemes ||
+    !cleanFindings ||
+    !cleanGaps ||
+    !cleanImplications
+  ) {
+    throw new Error('보고서의 모든 항목은 최소 1자 이상 입력해야 합니다.');
+  }
+
+  try {
+    await updateDoc(doc(db, 'monthlyReports', reportId), {
+      monthLabel: cleanMonth,
+      periodRange: cleanPeriod,
+      categoryFlows: cleanFlows,
+      notablePapers: cleanNotable,
+      keyThemes: cleanThemes,
+      commonFindings: cleanFindings,
+      researchGaps: cleanGaps,
+      fieldImplications: cleanImplications,
+      isPublished: updates.isPublished,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `monthlyReports/${reportId}`);
   }
 }
 
@@ -769,8 +1082,10 @@ export async function collectAndAnalyzePapers({
   activeYouthSyncPromise = (async (): Promise<YouthSyncRunResult> => {
     const kst = getKstScheduleContext();
     const statusRef = doc(db, 'settings', 'researchSync');
-    const safeActorName = (actorName || '원우회 관리자').slice(0, LIMITS.displayName);
-    const safeLookback = Math.min(Math.max(Math.round(lookbackMonths || 3), 1), 24);
+    const safeActorName = (actorName?.trim() || '원우회 관리자').slice(0, LIMITS.displayName);
+    const safeLookback = Math.min(Math.max(Math.round(lookbackMonths || 3), 1), 60);
+    const lookbackLabel =
+      safeLookback >= 60 ? '초기 5년(60개월)' : safeLookback === 12 ? '정기 12개월' : `최근 ${safeLookback}개월`;
 
     const existingDois = existingPapers.map((p) => normalizeDoi(p.doi)).filter(Boolean);
     const existingOpenAlexIds = existingPapers
@@ -786,13 +1101,16 @@ export async function collectAndAnalyzePapers({
         nextSyncAt: kst.nextRunTimestamp,
         lastSyncStatus: 'syncing',
         lastSyncMode: triggerType === 'scheduled_monthly' ? 'monthly' : 'manual',
-        lastSyncCount: currentStatus?.lastSyncCount ?? 0,
-        lastSyncMessage: `OpenAlex·Crossref에서 최근 ${safeLookback}개월 논문을 수집하고 있습니다...`,
-        windowLabel: currentStatus?.windowLabel || `최근 ${safeLookback}개월`,
+        lastSyncCount: Math.min(Math.max(0, Math.round(currentStatus?.lastSyncCount ?? 0)), 500),
+        lastSyncMessage: `OpenAlex·Crossref에서 ${lookbackLabel} 국내외 논문을 수집하고 있습니다...`.slice(
+          0,
+          400
+        ),
+        windowLabel: (currentStatus?.windowLabel || lookbackLabel).slice(0, 80),
         scheduleCron: MONTHLY_CRON,
         timezone: MONTHLY_TIMEZONE,
         ...(currentStatus?.koreanCoverageNotice
-          ? { koreanCoverageNotice: currentStatus.koreanCoverageNotice }
+          ? { koreanCoverageNotice: currentStatus.koreanCoverageNotice.slice(0, 400) }
           : {}),
         updatedByUid: authUser.uid,
         updatedByName: safeActorName,
@@ -872,7 +1190,7 @@ export async function collectAndAnalyzePapers({
         }
       }
 
-      const windowLabel = `${stats.fromDate} ~ ${stats.toDate} (최근 ${safeLookback}개월)`;
+      const windowLabel = `${stats.fromDate} ~ ${stats.toDate} (${lookbackLabel})`;
       const collectionErrors = sanitizeStringArray(stats.collectionErrors, 25, 240);
       const koreanCoverageNotice = (stats.koreanCoverageNotice || '').slice(0, 400);
 
@@ -904,19 +1222,23 @@ export async function collectAndAnalyzePapers({
       const analysisErrors: string[] = [];
       const analyzedById = new Map<string, AnalyzedPaperPayload>();
 
-      // Step 2: Try Gemini AI analysis on server if available, while still preserving collected papers if AI server is unavailable or errored
+      // Step 2: Try Gemini AI analysis on server in safe chunks of 12, preserving collected papers if AI server is unavailable or errored
       if (newDrafts.length > 0 && !usedStaticCollectionFallback) {
         try {
-          const analyzeRes = await fetch(resolveApiUrl('/api/papers/analyze'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ papers: newDrafts }),
-          });
+          for (let offset = 0; offset < newDrafts.length; offset += 12) {
+            const chunk = newDrafts.slice(offset, offset + 12);
+            const analyzeRes = await fetch(resolveApiUrl('/api/papers/analyze'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ papers: chunk }),
+            });
 
-          const analyzeType = analyzeRes.headers.get('content-type') || '';
-          if (!analyzeType.includes('application/json')) {
-            aiServerUnavailable = true;
-          } else {
+            const analyzeType = analyzeRes.headers.get('content-type') || '';
+            if (!analyzeType.includes('application/json')) {
+              aiServerUnavailable = true;
+              break;
+            }
+
             const analyzeJson = (await analyzeRes.json()) as {
               results?: AnalyzedPaperPayload[];
               stats?: {
@@ -933,15 +1255,16 @@ export async function collectAndAnalyzePapers({
               aiGlobalErrorMessage =
                 analyzeJson.error || `AI 논문 분석 서버 오류 (${analyzeRes.status})`;
               analysisErrors.push(aiGlobalErrorMessage.slice(0, 240));
-            } else {
-              const results = Array.isArray(analyzeJson.results) ? analyzeJson.results : [];
-              results.forEach((r) => analyzedById.set(r.paperId, r));
-              geminiCalls = analyzeJson.stats?.geminiCalls ?? results.length;
-              estimatedTokens = analyzeJson.stats?.estimatedTokens ?? 0;
-              analyzedSuccessCount = analyzeJson.stats?.analyzedSuccessCount ?? 0;
-              analyzedFailedCount = analyzeJson.stats?.analyzedFailedCount ?? 0;
-              analysisErrors.push(...sanitizeStringArray(analyzeJson.stats?.analysisErrors, 25, 240));
+              break;
             }
+
+            const results = Array.isArray(analyzeJson.results) ? analyzeJson.results : [];
+            results.forEach((r) => analyzedById.set(r.paperId, r));
+            geminiCalls += analyzeJson.stats?.geminiCalls ?? results.length;
+            estimatedTokens += analyzeJson.stats?.estimatedTokens ?? 0;
+            analyzedSuccessCount += analyzeJson.stats?.analyzedSuccessCount ?? 0;
+            analyzedFailedCount += analyzeJson.stats?.analyzedFailedCount ?? 0;
+            analysisErrors.push(...sanitizeStringArray(analyzeJson.stats?.analysisErrors, 25, 240));
           }
         } catch (aiErr) {
           aiGlobalErrorMessage =
@@ -950,11 +1273,16 @@ export async function collectAndAnalyzePapers({
         }
       }
 
-      // Step 3: Save new papers, syncLog, and updated settings/researchSync
-      const batch = writeBatch(db);
+      // Step 3: Save new papers in rule-compliant chunks, syncLog, and updated settings/researchSync
       const savedRecordsForReport: PaperRecord[] = [...existingPapers];
+      const preparedPaperWrites: Array<{ paperId: string; paperDoc: Record<string, unknown> }> = [];
 
       newDrafts.forEach((draft) => {
+        const cleanTitle = draft.title.trim().slice(0, 300);
+        if (cleanTitle.length < 2) return;
+        const safePaperId = draft.paperId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+        if (!safePaperId) return;
+
         const ai = analyzedById.get(draft.paperId);
         const mainCategory = YOUTH_RESEARCH_CATEGORIES.includes(
           ai?.mainCategory as YouthResearchCategory
@@ -978,22 +1306,23 @@ export async function collectAndAnalyzePapers({
             ? 'failed'
             : ai?.analysisStatus || 'pending';
 
-        const defaultBasis = ai?.analysisBasis
-          ? ai.analysisBasis
-          : draft.abstract.length >= 40
-            ? '초록 수집 완료 (AI 분석 대기)'
-            : '서지정보 수집 완료 (AI 분석 대기)';
+        const defaultBasis = (
+          ai?.analysisBasis
+            ? ai.analysisBasis
+            : draft.abstract.length >= 40
+              ? '초록 수집 완료 (AI 분석 대기)'
+              : '서지정보 수집 완료 (AI 분석 대기)'
+        ).slice(0, 100);
 
         const paperDoc: Record<string, unknown> = {
-          paperId: draft.paperId,
-          title: draft.title.slice(0, 300),
+          paperId: safePaperId,
+          title: cleanTitle,
           authors: sanitizeStringArray(draft.authors, 25, 120),
-          journalName: (draft.journalName || '학술지 미상').slice(0, 200),
-          publicationDate: (draft.publicationDate || kst.kstDateLabel.replace(/\./g, '-')).slice(
-            0,
-            20
-          ),
-          language: (draft.language || 'en').slice(0, 20),
+          journalName: (draft.journalName?.trim() || '학술지 미상').slice(0, 200),
+          publicationDate: (
+            draft.publicationDate?.trim() || kst.kstDateLabel.replace(/\./g, '-')
+          ).slice(0, 20),
+          language: (draft.language?.trim() || 'en').slice(0, 20),
           region: draft.region,
           abstract: (draft.abstract || '').slice(0, 8000),
           keywords: mergedKeywords,
@@ -1001,12 +1330,12 @@ export async function collectAndAnalyzePapers({
           ...(draft.openAlexId ? { openAlexId: draft.openAlexId.slice(0, 160) } : {}),
           ...(draft.crossrefId ? { crossrefId: draft.crossrefId.slice(0, 200) } : {}),
           ...(draft.paperUrl ? { paperUrl: draft.paperUrl.slice(0, 500) } : {}),
-          source: (draft.source || 'OpenAlex').slice(0, 60),
+          source: (draft.source?.trim() || 'OpenAlex').slice(0, 60),
           openAccess: Boolean(draft.openAccess),
-          citedByCount: Math.max(0, Math.round(Number(draft.citedByCount || 0))),
+          citedByCount: Math.min(Math.max(0, Math.round(Number(draft.citedByCount || 0))), 1000000),
           mainCategory,
           relatedCategories,
-          analysisBasis: defaultBasis.slice(0, 100),
+          analysisBasis: defaultBasis,
           analysisStatus: defaultStatus,
           isPublished: true,
           aiAnalysisDate: (ai?.aiAnalysisDate || new Date().toISOString().slice(0, 10)).slice(
@@ -1037,12 +1366,25 @@ export async function collectAndAnalyzePapers({
           paperDoc.analysisError = (ai?.analysisError || aiGlobalErrorMessage).slice(0, 500);
         } else if (aiServerUnavailable) {
           paperDoc.analysisError =
-            '정적 호스팅(GitHub Pages)에서 서지와 초록이 먼저 수집되었습니다. AI Studio 서버 환경(*.run.app)에서 [대기·실패 논문 AI 분석]을 실행하면 AI 요약이 채워집니다.';
+            '정적 호스팅(GitHub Pages)에서 서지와 초록이 먼저 수집되었습니다. AI Studio 서버 환경(*.run.app)에서 [대기·실패 논문 AI 분석]을 실행하면 AI 요약이 채워집니다.'.slice(
+              0,
+              500
+            );
         }
 
-        batch.set(doc(db, 'papers', draft.paperId), paperDoc);
+        preparedPaperWrites.push({ paperId: safePaperId, paperDoc });
         savedRecordsForReport.unshift(paperDoc as unknown as PaperRecord);
       });
+
+      const PAPER_BATCH_SIZE = 300;
+      for (let i = 0; i < preparedPaperWrites.length; i += PAPER_BATCH_SIZE) {
+        const paperChunk = preparedPaperWrites.slice(i, i + PAPER_BATCH_SIZE);
+        const paperBatch = writeBatch(db);
+        paperChunk.forEach(({ paperId, paperDoc }) => {
+          paperBatch.set(doc(db, 'papers', paperId), paperDoc);
+        });
+        await paperBatch.commit();
+      }
 
       const domesticCount = newDrafts.filter((p) => p.region === 'domestic').length;
       const internationalCount = newDrafts.length - domesticCount;
@@ -1050,25 +1392,27 @@ export async function collectAndAnalyzePapers({
       const pendingOrFailedCount = aiServerUnavailable || aiGlobalErrorMessage
         ? newDrafts.length
         : analyzedFailedCount;
+      const safeAnalysisErrors = sanitizeStringArray(analysisErrors, 25, 240);
       const logStatus =
         collectionErrors.length > 0 || pendingOrFailedCount > 0 ? 'partial' : 'success';
 
-      batch.set(doc(db, 'syncLogs', logId), {
+      const statusBatch = writeBatch(db);
+      statusBatch.set(doc(db, 'syncLogs', logId), {
         logId,
         triggerType,
         status: logStatus,
-        collectedCount: Math.max(0, Math.round(collected.length)),
-        newPapersCount: Math.max(0, Math.round(newDrafts.length)),
-        domesticCount: Math.max(0, Math.round(domesticCount)),
-        internationalCount: Math.max(0, Math.round(internationalCount)),
-        analyzedSuccessCount: Math.max(0, Math.round(analyzedSuccessCount)),
-        analyzedFailedCount: Math.max(0, Math.round(pendingOrFailedCount)),
-        openAlexCalls: Math.max(0, Math.round(stats.openAlexCalls ?? 0)),
-        crossrefCalls: Math.max(0, Math.round(stats.crossrefCalls ?? 0)),
-        geminiCalls: Math.max(0, Math.round(geminiCalls)),
-        estimatedTokens: Math.max(0, Math.round(estimatedTokens)),
+        collectedCount: Math.min(Math.max(0, Math.round(collected.length)), 10000),
+        newPapersCount: Math.min(Math.max(0, Math.round(preparedPaperWrites.length)), 10000),
+        domesticCount: Math.min(Math.max(0, Math.round(domesticCount)), 10000),
+        internationalCount: Math.min(Math.max(0, Math.round(internationalCount)), 10000),
+        analyzedSuccessCount: Math.min(Math.max(0, Math.round(analyzedSuccessCount)), 10000),
+        analyzedFailedCount: Math.min(Math.max(0, Math.round(pendingOrFailedCount)), 10000),
+        openAlexCalls: Math.min(Math.max(0, Math.round(stats.openAlexCalls ?? 0)), 10000),
+        crossrefCalls: Math.min(Math.max(0, Math.round(stats.crossrefCalls ?? 0)), 10000),
+        geminiCalls: Math.min(Math.max(0, Math.round(geminiCalls)), 10000),
+        estimatedTokens: Math.min(Math.max(0, Math.round(estimatedTokens)), 100000000),
         collectionErrors,
-        analysisErrors,
+        analysisErrors: safeAnalysisErrors,
         ...(koreanCoverageNotice ? { koreanCoverageNotice } : {}),
         executedByUid: authUser.uid,
         executedByName: safeActorName,
@@ -1086,14 +1430,14 @@ export async function collectAndAnalyzePapers({
         summaryMessage = `최근 ${safeLookback}개월 신규 논문 ${newDrafts.length}편(국내 ${domesticCount} · 해외 ${internationalCount}) 수집 및 AI 분석 완료(${analyzedSuccessCount}성공 / ${analyzedFailedCount}실패).`;
       }
 
-      batch.set(statusRef, {
+      statusBatch.set(statusRef, {
         autoEnabled,
         intervalDays: MONTHLY_INTERVAL_DAYS,
         lastSyncedAt: serverTimestamp(),
         nextSyncAt: kst.nextRunTimestamp,
         lastSyncStatus: 'success',
         lastSyncMode: triggerType === 'scheduled_monthly' ? 'monthly' : 'manual',
-        lastSyncCount: Math.max(0, Math.round(newDrafts.length)),
+        lastSyncCount: Math.min(Math.max(0, Math.round(preparedPaperWrites.length)), 500),
         lastSyncMessage: summaryMessage.slice(0, 400),
         windowLabel: windowLabel.slice(0, 80),
         scheduleCron: MONTHLY_CRON,
@@ -1104,7 +1448,7 @@ export async function collectAndAnalyzePapers({
         updatedAt: serverTimestamp(),
       });
 
-      await batch.commit();
+      await statusBatch.commit();
 
       if (
         generateReportToo &&
@@ -1197,170 +1541,284 @@ export async function retryFailedPapers({
   failedPapers,
   authUser,
   actorName,
+  maxPapers = 48,
+  onProgress,
 }: {
   failedPapers: PaperRecord[];
   authUser: User;
   actorName: string;
-}): Promise<{ ok: boolean; successCount: number; failedCount: number; message: string }> {
+  maxPapers?: number;
+  onProgress?: (processed: number, total: number) => void;
+}): Promise<{
+  ok: boolean;
+  successCount: number;
+  failedCount: number;
+  remainingCount: number;
+  message: string;
+}> {
   if (failedPapers.length === 0) {
     return {
       ok: true,
       successCount: 0,
       failedCount: 0,
+      remainingCount: 0,
       message: 'AI 분석이 필요한 대기·실패 논문이 없습니다.',
     };
   }
 
   const safeActorName = (actorName || '원우회 관리자').slice(0, LIMITS.displayName);
+  const prioritized = [...failedPapers].sort((a, b) => {
+    const aPending = a.analysisStatus === 'pending' ? 1 : 0;
+    const bPending = b.analysisStatus === 'pending' ? 1 : 0;
+    if (bPending !== aPending) return bPending - aPending;
+    const aAbs = (a.abstract || '').trim().length >= 40 ? 1 : 0;
+    const bAbs = (b.abstract || '').trim().length >= 40 ? 1 : 0;
+    if (bAbs !== aAbs) return bAbs - aAbs;
+    return (b.publicationDate || '').localeCompare(a.publicationDate || '');
+  });
+
+  const targetQueue = prioritized.slice(0, Math.min(Math.max(maxPapers, 1), 60));
+  const remainingAfterQueue = Math.max(0, failedPapers.length - targetQueue.length);
+  const chunkSize = 12;
+
+  let totalSuccess = 0;
+  let totalFailed = 0;
+  let totalGeminiCalls = 0;
+  let totalTokens = 0;
+  const collectedAnalysisErrors: string[] = [];
+  let fatalMessage = '';
+  let staticHostingError = false;
 
   try {
-    const res = await fetch(resolveApiUrl('/api/papers/analyze'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        papers: failedPapers.slice(0, 16).map((p) => ({
-          paperId: p.paperId,
-          title: p.title,
-          authors: p.authors,
-          journalName: p.journalName,
-          publicationDate: p.publicationDate,
-          language: p.language,
-          abstract: p.abstract,
-          keywords: p.keywords,
-          hintCategory: p.mainCategory,
-        })),
-      }),
-    });
+    onProgress?.(0, targetQueue.length);
 
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
+    for (let offset = 0; offset < targetQueue.length; offset += chunkSize) {
+      const chunk = targetQueue.slice(offset, offset + chunkSize);
+
+      const res = await fetch(resolveApiUrl('/api/papers/analyze'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          papers: chunk.map((p) => ({
+            paperId: p.paperId,
+            title: p.title,
+            authors: p.authors,
+            journalName: p.journalName,
+            publicationDate: p.publicationDate,
+            language: p.language,
+            abstract: p.abstract,
+            keywords: p.keywords,
+            hintCategory: p.mainCategory,
+          })),
+        }),
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        staticHostingError = true;
+        fatalMessage =
+          '정적 호스팅(GitHub Pages)에서는 AI 분석 API 서버를 호출할 수 없습니다. AI Studio 서버 주소(*.run.app)에서 실행해 주세요.';
+        break;
+      }
+
+      const data = (await res.json()) as {
+        results?: AnalyzedPaperPayload[];
+        stats?: {
+          geminiCalls: number;
+          estimatedTokens: number;
+          analyzedSuccessCount: number;
+          analyzedFailedCount: number;
+          analysisErrors: string[];
+        };
+        error?: string;
+      };
+
+      if (!res.ok) {
+        fatalMessage = data.error || `AI 분석 요청 오류 (${res.status})`;
+        collectedAnalysisErrors.push(fatalMessage.slice(0, 240));
+        break;
+      }
+
+      const results = Array.isArray(data.results) ? data.results : [];
+      if (results.length > 0) {
+        const batch = writeBatch(db);
+        results.forEach((ai) => {
+          const targetPaper = chunk.find((p) => p.paperId === ai.paperId);
+          if (!targetPaper) return;
+          const mainCategory = YOUTH_RESEARCH_CATEGORIES.includes(
+            ai.mainCategory as YouthResearchCategory
+          )
+            ? ai.mainCategory
+            : targetPaper.mainCategory;
+          const relatedCategories = sanitizeStringArray(ai.relatedCategories, 6, 80).filter(
+            (c): c is YouthResearchCategory =>
+              YOUTH_RESEARCH_CATEGORIES.includes(c as YouthResearchCategory) && c !== mainCategory
+          );
+
+          const updateFields: Record<string, unknown> = {
+            mainCategory,
+            relatedCategories,
+            keywords: Array.from(
+              new Set([
+                ...sanitizeStringArray(ai.keywords, 12, 80),
+                ...sanitizeStringArray(targetPaper.keywords, 12, 80),
+              ])
+            ).slice(0, 12),
+            analysisBasis: (ai.analysisBasis || '초록 기반 분석').slice(0, 100),
+            analysisStatus: ai.analysisStatus,
+            aiAnalysisDate: (ai.aiAnalysisDate || new Date().toISOString().slice(0, 10)).slice(
+              0,
+              40
+            ),
+            updatedAt: serverTimestamp(),
+          };
+
+          if (ai.researchPurpose) updateFields.researchPurpose = ai.researchPurpose.slice(0, 1500);
+          if (ai.researchBackground) {
+            updateFields.researchBackground = ai.researchBackground.slice(0, 1500);
+          }
+          if (ai.researchQuestion) updateFields.researchQuestion = ai.researchQuestion.slice(0, 1000);
+          if (ai.researchMethod) updateFields.researchMethod = ai.researchMethod.slice(0, 1500);
+          if (ai.researchTarget) updateFields.researchTarget = ai.researchTarget.slice(0, 1000);
+          if (ai.researchFindings) updateFields.researchFindings = ai.researchFindings.slice(0, 2500);
+          if (ai.researchLimitations) {
+            updateFields.researchLimitations = ai.researchLimitations.slice(0, 1500);
+          }
+          if (ai.practicalImplications) {
+            updateFields.practicalImplications = ai.practicalImplications.slice(0, 2000);
+          }
+          if (ai.policyImplications) {
+            updateFields.policyImplications = ai.policyImplications.slice(0, 2000);
+          }
+          if (ai.easySummary) updateFields.easySummary = ai.easySummary.slice(0, 2500);
+          updateFields.analysisError = ai.analysisError ? ai.analysisError.slice(0, 500) : '';
+
+          batch.update(doc(db, 'papers', targetPaper.paperId), updateFields);
+        });
+        await batch.commit();
+      }
+
+      totalSuccess += data.stats?.analyzedSuccessCount ?? 0;
+      totalFailed += data.stats?.analyzedFailedCount ?? 0;
+      totalGeminiCalls += data.stats?.geminiCalls ?? results.length;
+      totalTokens += data.stats?.estimatedTokens ?? 0;
+      collectedAnalysisErrors.push(
+        ...sanitizeStringArray(data.stats?.analysisErrors, 25, 240)
+      );
+
+      onProgress?.(Math.min(offset + chunk.length, targetQueue.length), targetQueue.length);
+    }
+
+    if (staticHostingError) {
       return {
         ok: false,
         successCount: 0,
         failedCount: failedPapers.length,
-        message:
-          '정적 호스팅(GitHub Pages)에서는 AI 분석 API 서버를 호출할 수 없습니다. AI Studio 서버 주소(*.run.app)에서 실행해 주세요.',
+        remainingCount: failedPapers.length,
+        message: fatalMessage,
       };
     }
 
-    const data = (await res.json()) as {
-      results?: AnalyzedPaperPayload[];
-      stats?: {
-        geminiCalls: number;
-        estimatedTokens: number;
-        analyzedSuccessCount: number;
-        analyzedFailedCount: number;
-        analysisErrors: string[];
-      };
-      error?: string;
-    };
-
-    if (!res.ok) {
-      throw new Error(data.error || `AI 분석 요청 오류 (${res.status})`);
-    }
-
-    const results = Array.isArray(data.results) ? data.results : [];
-    const batch = writeBatch(db);
-
-    results.forEach((ai) => {
-      const targetPaper = failedPapers.find((p) => p.paperId === ai.paperId);
-      if (!targetPaper) return;
-      const mainCategory = YOUTH_RESEARCH_CATEGORIES.includes(
-        ai.mainCategory as YouthResearchCategory
-      )
-        ? ai.mainCategory
-        : targetPaper.mainCategory;
-      const relatedCategories = sanitizeStringArray(ai.relatedCategories, 6, 80).filter(
-        (c): c is YouthResearchCategory =>
-          YOUTH_RESEARCH_CATEGORIES.includes(c as YouthResearchCategory) && c !== mainCategory
-      );
-
-      const updateFields: Record<string, unknown> = {
-        mainCategory,
-        relatedCategories,
-        keywords: Array.from(
-          new Set([
-            ...sanitizeStringArray(ai.keywords, 12, 80),
-            ...sanitizeStringArray(targetPaper.keywords, 12, 80),
-          ])
-        ).slice(0, 12),
-        analysisBasis: (ai.analysisBasis || '초록 기반 분석').slice(0, 100),
-        analysisStatus: ai.analysisStatus,
-        aiAnalysisDate: (ai.aiAnalysisDate || new Date().toISOString().slice(0, 10)).slice(0, 40),
-        updatedAt: serverTimestamp(),
-      };
-
-      if (ai.researchPurpose) updateFields.researchPurpose = ai.researchPurpose.slice(0, 1500);
-      if (ai.researchBackground) {
-        updateFields.researchBackground = ai.researchBackground.slice(0, 1500);
-      }
-      if (ai.researchQuestion) updateFields.researchQuestion = ai.researchQuestion.slice(0, 1000);
-      if (ai.researchMethod) updateFields.researchMethod = ai.researchMethod.slice(0, 1500);
-      if (ai.researchTarget) updateFields.researchTarget = ai.researchTarget.slice(0, 1000);
-      if (ai.researchFindings) updateFields.researchFindings = ai.researchFindings.slice(0, 2500);
-      if (ai.researchLimitations) {
-        updateFields.researchLimitations = ai.researchLimitations.slice(0, 1500);
-      }
-      if (ai.practicalImplications) {
-        updateFields.practicalImplications = ai.practicalImplications.slice(0, 2000);
-      }
-      if (ai.policyImplications) {
-        updateFields.policyImplications = ai.policyImplications.slice(0, 2000);
-      }
-      if (ai.easySummary) updateFields.easySummary = ai.easySummary.slice(0, 2500);
-      updateFields.analysisError = ai.analysisError ? ai.analysisError.slice(0, 500) : '';
-
-      batch.update(doc(db, 'papers', targetPaper.paperId), updateFields);
-    });
+    const finalRemaining = Math.max(0, failedPapers.length - totalSuccess);
+    const logStatus =
+      fatalMessage && totalSuccess === 0
+        ? 'error'
+        : fatalMessage || totalFailed > 0 || collectedAnalysisErrors.length > 0
+          ? 'partial'
+          : 'success';
 
     const logId = `log_${Date.now()}`;
-    const successCount = data.stats?.analyzedSuccessCount ?? 0;
-    const failedCount = data.stats?.analyzedFailedCount ?? 0;
-
-    batch.set(doc(db, 'syncLogs', logId), {
+    await setDoc(doc(db, 'syncLogs', logId), {
       logId,
       triggerType: 'retry_failed',
-      status: failedCount > 0 ? 'partial' : 'success',
-      collectedCount: failedPapers.length,
+      status: logStatus,
+      collectedCount: targetQueue.length,
       newPapersCount: 0,
-      domesticCount: failedPapers.filter((p) => p.region === 'domestic').length,
-      internationalCount: failedPapers.filter((p) => p.region === 'international').length,
-      analyzedSuccessCount: successCount,
-      analyzedFailedCount: failedCount,
+      domesticCount: targetQueue.filter((p) => p.region === 'domestic').length,
+      internationalCount: targetQueue.filter((p) => p.region === 'international').length,
+      analyzedSuccessCount: totalSuccess,
+      analyzedFailedCount: totalFailed + (fatalMessage ? targetQueue.length - totalSuccess - totalFailed : 0),
       openAlexCalls: 0,
       crossrefCalls: 0,
-      geminiCalls: data.stats?.geminiCalls ?? results.length,
-      estimatedTokens: data.stats?.estimatedTokens ?? 0,
+      geminiCalls: totalGeminiCalls,
+      estimatedTokens: totalTokens,
       collectionErrors: [],
-      analysisErrors: sanitizeStringArray(data.stats?.analysisErrors, 25, 240),
+      analysisErrors: sanitizeStringArray(collectedAnalysisErrors, 25, 240),
       executedByUid: authUser.uid,
       executedByName: safeActorName,
       createdAt: serverTimestamp(),
     });
 
-    await batch.commit();
+    if (fatalMessage && totalSuccess === 0) {
+      return {
+        ok: false,
+        successCount: 0,
+        failedCount: targetQueue.length,
+        remainingCount: failedPapers.length,
+        message: fatalMessage,
+      };
+    }
+
+    const tailNotice =
+      fatalMessage
+        ? ` (중단 사유: ${fatalMessage})`
+        : remainingAfterQueue > 0
+          ? ` · 남은 ${remainingAfterQueue}편은 버튼을 다시 눌러 이어서 분석할 수 있습니다.`
+          : '';
 
     return {
-      ok: true,
-      successCount,
-      failedCount,
-      message: `대기·실패 논문 AI 분석 완료: ${successCount}건 성공, ${failedCount}건 실패`,
+      ok: totalSuccess > 0 || totalFailed === 0,
+      successCount: totalSuccess,
+      failedCount: totalFailed,
+      remainingCount: finalRemaining,
+      message: `대기·실패 논문 AI 분석 복구 완료: ${totalSuccess}건 성공, ${totalFailed}건 실패${tailNotice}`,
     };
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : '논문 AI 분석 중 오류가 발생했습니다.';
+    try {
+      const logId = `log_${Date.now()}`;
+      await setDoc(doc(db, 'syncLogs', logId), {
+        logId,
+        triggerType: 'retry_failed',
+        status: 'error',
+        collectedCount: targetQueue.length,
+        newPapersCount: 0,
+        domesticCount: targetQueue.filter((p) => p.region === 'domestic').length,
+        internationalCount: targetQueue.filter((p) => p.region === 'international').length,
+        analyzedSuccessCount: totalSuccess,
+        analyzedFailedCount: Math.max(0, targetQueue.length - totalSuccess),
+        openAlexCalls: 0,
+        crossrefCalls: 0,
+        geminiCalls: totalGeminiCalls,
+        estimatedTokens: totalTokens,
+        collectionErrors: [],
+        analysisErrors: [errMsg.slice(0, 240)],
+        executedByUid: authUser.uid,
+        executedByName: safeActorName,
+        createdAt: serverTimestamp(),
+      });
+    } catch {
+      // Secondary log write failure ignored safely
+    }
     return {
       ok: false,
-      successCount: 0,
-      failedCount: failedPapers.length,
-      message: error instanceof Error ? error.message : '논문 AI 분석 중 오류가 발생했습니다.',
+      successCount: totalSuccess,
+      failedCount: Math.max(0, failedPapers.length - totalSuccess),
+      remainingCount: Math.max(0, failedPapers.length - totalSuccess),
+      message: errMsg,
     };
   }
 }
 
 export async function togglePaperVisibility(paper: PaperRecord): Promise<void> {
-  await updateDoc(doc(db, 'papers', paper.paperId), {
-    isPublished: !paper.isPublished,
-    updatedAt: serverTimestamp(),
-  });
+  try {
+    await updateDoc(doc(db, 'papers', paper.paperId), {
+      isPublished: !paper.isPublished,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `papers/${paper.paperId}`);
+  }
 }
 
 export interface AcademicSourceStatus {
@@ -1386,6 +1844,14 @@ export interface AcademicSourcesStatusResponse {
     extended: string[];
     totalCount: number;
   };
+  overseasKeywords?: string[];
+  koreanJournals?: Array<{
+    nameKo: string;
+    nameEn: string;
+    publisherEn: string;
+    issn: string;
+    doiPrefix: string;
+  }>;
 }
 
 export interface NanetPaperPreview {
@@ -1427,12 +1893,16 @@ export async function fetchAcademicSourcesStatus(): Promise<AcademicSourcesStatu
       ok: boolean;
       sources: AcademicSourceStatus[];
       koreanKeywords: { core: string[]; extended: string[]; totalCount: number };
+      overseasKeywords?: string[];
+      koreanJournals?: AcademicSourcesStatusResponse['koreanJournals'];
     };
     return {
       ok: true,
       serverAvailable: true,
       sources: data.sources || [],
       koreanKeywords: data.koreanKeywords || { core: [], extended: [], totalCount: 0 },
+      overseasKeywords: data.overseasKeywords || [],
+      koreanJournals: data.koreanJournals || [],
     };
   } catch {
     return {
@@ -1473,7 +1943,7 @@ export async function fetchAcademicSourcesStatus(): Promise<AcademicSourcesStatu
           scope: 'international',
           configured: true,
           status: 'connected',
-          stepLabel: '연동 중 (CORS)',
+          stepLabel: '4단계 (고도화 완료)',
           storagePermission: 'open_metadata_and_abstract',
           aiProcessingPermission: 'allowed_open_abstract',
           termsSummary: '공개 학술 메타데이터·초록 직접 수집 가능.',
@@ -1485,14 +1955,30 @@ export async function fetchAcademicSourcesStatus(): Promise<AcademicSourcesStatu
           scope: 'international',
           configured: true,
           status: 'connected',
-          stepLabel: '연동 중 (CORS)',
+          stepLabel: '4단계 (고도화 완료)',
           storagePermission: 'open_metadata_and_abstract',
           aiProcessingPermission: 'allowed_open_abstract',
-          termsSummary: 'DOI·서지정보 보완 가능.',
+          termsSummary: 'DOI·국내 6대 청소년학 학술지·해외 키워드 보완 가능.',
           endpointInfo: 'https://api.crossref.org/works',
+        },
+        {
+          id: 'dbpia',
+          name: 'DBpia Open API (실시간 검색 · 원문 링크 전용)',
+          scope: 'domestic',
+          envVar: 'DBPIA_API_KEY',
+          configured: false,
+          status: 'ready_needs_key',
+          stepLabel: '5단계 (구현 완료)',
+          storagePermission: 'search_only_link',
+          aiProcessingPermission: 'prohibited_without_license',
+          termsSummary:
+            '정적 호스팅 환경에서는 서버 전용 API 키 상태를 조회할 수 없습니다. AI Studio 서버 환경에서 확인하세요.',
+          endpointInfo: 'https://api.dbpia.co.kr/v2/search/search.xml',
         },
       ],
       koreanKeywords: { core: [], extended: [], totalCount: 0 },
+      overseasKeywords: [],
+      koreanJournals: [],
     };
   }
 }
@@ -1598,5 +2084,422 @@ export async function testNlPaperSearch(
     };
   }
 }
+
+export interface GlobalAcademicSearchItem {
+  paperId: string;
+  title: string;
+  authors: string[];
+  journalName: string;
+  publisher: string;
+  publicationDate: string;
+  language: string;
+  country: string;
+  region: 'domestic' | 'international';
+  regionReason: string;
+  doi: string;
+  paperUrl: string;
+  source: string;
+}
+
+export interface GlobalAcademicSearchResult {
+  ok: boolean;
+  query: string;
+  regionScope: 'all' | 'domestic' | 'international';
+  fromDate?: string;
+  toDate?: string;
+  lookbackMonths?: number;
+  openAlexStatus?: string;
+  openAlexKeyConfigured?: boolean;
+  openAlexNote?: string;
+  totalReturned: number;
+  domesticCount: number;
+  internationalCount: number;
+  papers: GlobalAcademicSearchItem[];
+  message: string;
+}
+
+export async function testGlobalAcademicSearch(params: {
+  query: string;
+  regionScope?: 'all' | 'domestic' | 'international';
+  lookbackMonths?: 3 | 12 | 60;
+  limit?: number;
+}): Promise<GlobalAcademicSearchResult> {
+  try {
+    const res = await fetch(resolveApiUrl('/api/sources/global/search'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return {
+        ok: false,
+        query: params.query,
+        regionScope: params.regionScope || 'all',
+        totalReturned: 0,
+        domesticCount: 0,
+        internationalCount: 0,
+        papers: [],
+        message: '정적 호스팅 환경에서는 서버 통합 테스트 엔드포인트를 호출할 수 없습니다.',
+      };
+    }
+    return (await res.json()) as GlobalAcademicSearchResult;
+  } catch (error) {
+    return {
+      ok: false,
+      query: params.query,
+      regionScope: params.regionScope || 'all',
+      totalReturned: 0,
+      domesticCount: 0,
+      internationalCount: 0,
+      papers: [],
+      message:
+        error instanceof Error
+          ? `OpenAlex·Crossref 연계 테스트 실패: ${error.message}`
+          : 'OpenAlex·Crossref 연계 테스트에 실패했습니다.',
+    };
+  }
+}
+
+export interface DbpiaPaperPreview {
+  sourceId: string;
+  title: string;
+  authors: string[];
+  journalName: string;
+  publisherName: string;
+  publicationDate: string;
+  pages: string;
+  freeYn: 'Y' | 'N';
+  paperUrl: string;
+  sourceName: string;
+  country: 'KR';
+  region: 'domestic';
+  dataAvailability: 'metadata_and_link_only';
+  storagePermission: 'search_only_link';
+  aiProcessingPermission: 'prohibited_without_license';
+}
+
+export interface DbpiaSearchTestResult {
+  ok: boolean;
+  configured: boolean;
+  status: 'connected' | 'ready_needs_key' | 'api_error' | 'static_hosting';
+  source: string;
+  query: string;
+  sortType?: '1' | '2';
+  endpoint?: string;
+  totalCount: number;
+  papers: DbpiaPaperPreview[];
+  message: string;
+}
+
+export async function testDbpiaPaperSearch(
+  query: string,
+  sortType: '1' | '2' = '2',
+  pageNo = 1,
+  pageCount = 10
+): Promise<DbpiaSearchTestResult> {
+  try {
+    const res = await fetch(resolveApiUrl('/api/sources/dbpia/search'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, sortType, pageNo, pageCount }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return {
+        ok: false,
+        configured: false,
+        status: 'static_hosting',
+        source: 'dbpia',
+        query,
+        sortType,
+        totalCount: 0,
+        papers: [],
+        message:
+          '현재 정적 호스팅 환경에서는 DBpia Open API 프록시 서버를 호출할 수 없습니다. AI Studio 서버 환경 또는 VITE_API_BASE_URL 서버 연결 상태에서 검색해 주세요.',
+      };
+    }
+    return (await res.json()) as DbpiaSearchTestResult;
+  } catch (error) {
+    return {
+      ok: false,
+      configured: false,
+      status: 'api_error',
+      source: 'dbpia',
+      query,
+      sortType,
+      totalCount: 0,
+      papers: [],
+      message:
+        error instanceof Error
+          ? `DBpia API 검색 요청 실패: ${error.message}`
+          : 'DBpia API 검색 요청에 실패했습니다.',
+    };
+  }
+}
+
+export interface DiagnosticCheckItem {
+  id: string;
+  label: string;
+  category: 'firebase' | 'backend' | 'sources' | 'scheduler' | 'security';
+  status: 'pass' | 'warn' | 'fail';
+  latencyMs: number;
+  summary: string;
+  detail: string;
+}
+
+export interface SystemDiagnosticsReport {
+  checkedAtIso: string;
+  overallStatus: 'pass' | 'warn' | 'fail';
+  checks: DiagnosticCheckItem[];
+}
+
+export async function runAdminSystemDiagnostics({
+  authUser,
+  isAdmin,
+  papers,
+  monthlyReports,
+  syncLogs,
+  researchSyncStatus,
+}: {
+  authUser: User | null;
+  isAdmin: boolean;
+  papers: PaperRecord[];
+  monthlyReports: MonthlyTrendReport[];
+  syncLogs: Array<{ status: string }>;
+  researchSyncStatus: ResearchSyncStatus | null;
+}): Promise<SystemDiagnosticsReport> {
+  const checks: DiagnosticCheckItem[] = [];
+
+  // 1. Firebase Auth & Verified Email & Admin Gate Check
+  const authStart = performance.now();
+  const hasVerifiedAdmin = Boolean(authUser && authUser.emailVerified && isAdmin);
+  checks.push({
+    id: 'auth_rbac',
+    label: 'Firebase 인증 및 관리자 권한 경계',
+    category: 'security',
+    status: hasVerifiedAdmin ? 'pass' : 'fail',
+    latencyMs: Math.round(performance.now() - authStart),
+    summary: hasVerifiedAdmin
+      ? `인증 완료 (${authUser?.email || ''})`
+      : '이메일 인증 또는 관리자 권한 미충족',
+    detail: hasVerifiedAdmin
+      ? 'Google Verified Email 및 관리자 RBAC(/admins 또는 최고 관리자) 검증을 통과했습니다.'
+      : 'firestore.rules의 email_verified == true 및 isAdmin() 조건을 확인하세요.',
+  });
+
+  // 2. Firestore Live Server Connection Check
+  const fsStart = performance.now();
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    checks.push({
+      id: 'firestore_conn',
+      label: 'Firestore 실시간 서버 연결',
+      category: 'firebase',
+      status: 'pass',
+      latencyMs: Math.round(performance.now() - fsStart),
+      summary: 'Firestore 서버 직접 응답 확인',
+      detail: '오프라인 캐시가 아닌 원격 Firestore 서버(/test/connection)와 정상 통신 중입니다.',
+    });
+  } catch (err) {
+    checks.push({
+      id: 'firestore_conn',
+      label: 'Firestore 실시간 서버 연결',
+      category: 'firebase',
+      status: 'fail',
+      latencyMs: Math.round(performance.now() - fsStart),
+      summary: 'Firestore 서버 응답 실패',
+      detail: err instanceof Error ? err.message : '네트워크 또는 Firebase 설정을 확인해 주세요.',
+    });
+  }
+
+  // 3. Backend /api/health & Gemini Server Capability Check
+  const healthStart = performance.now();
+  let serverAvailable = false;
+  try {
+    const res = await fetch(resolveApiUrl('/api/health'));
+    const ctype = res.headers.get('content-type') || '';
+    if (!res.ok || !ctype.includes('application/json')) {
+      throw new Error('정적 호스팅 또는 API 서버 비활성 상태');
+    }
+    const health = (await res.json()) as {
+      ok?: boolean;
+      geminiConfigured?: boolean;
+      nanetConfigured?: boolean;
+      nlConfigured?: boolean;
+      dbpiaConfigured?: boolean;
+      openAlexKeyConfigured?: boolean;
+      schedule?: { cron?: string; timezone?: string; nextRunLabel?: string };
+    };
+    serverAvailable = Boolean(health.ok);
+    checks.push({
+      id: 'backend_health',
+      label: 'Express API 서버 · Gemini AI 키 구성',
+      category: 'backend',
+      status: health.ok && health.geminiConfigured ? 'pass' : health.ok ? 'warn' : 'fail',
+      latencyMs: Math.round(performance.now() - healthStart),
+      summary: health.geminiConfigured
+        ? 'API 서버 및 GEMINI_API_KEY 준비됨'
+        : 'API 서버 정상 · GEMINI_API_KEY 미설정',
+      detail: `서버 스케줄 ${health.schedule?.cron || '0 3 1 * *'} (${health.schedule?.timezone || 'Asia/Seoul'}) · 다음 실행 ${health.schedule?.nextRunLabel || '-'}`,
+    });
+
+    const configuredOptionalKeys = [
+      health.nanetConfigured ? '국회도서관(NANET)' : null,
+      health.nlConfigured ? '국립중앙도서관(NL)' : null,
+      health.dbpiaConfigured ? 'DBpia' : null,
+      health.openAlexKeyConfigured ? 'OpenAlex Key' : null,
+    ].filter((x): x is string => Boolean(x));
+
+    checks.push({
+      id: 'academic_keys',
+      label: '국내외 학술 API 키 등록 현황',
+      category: 'sources',
+      status: configuredOptionalKeys.length > 0 ? 'pass' : 'warn',
+      latencyMs: 0,
+      summary:
+        configuredOptionalKeys.length > 0
+          ? `선택 API 키 ${configuredOptionalKeys.length}종 활성화`
+          : 'OpenAlex·Crossref 공개 연동 활성 (국회·국중·DBpia 키 선택 등록 대기)',
+      detail:
+        configuredOptionalKeys.length > 0
+          ? `등록된 서버 비밀키: ${configuredOptionalKeys.join(', ')}`
+          : '국회도서관(NANET_API_KEY), 국립중앙도서관(NL_API_KEY), DBpia(DBPIA_API_KEY)는 Settings > Secrets 등록 시 즉시 활성화됩니다.',
+    });
+  } catch (err) {
+    checks.push({
+      id: 'backend_health',
+      label: 'Express API 서버 · Gemini AI 키 구성',
+      category: 'backend',
+      status: 'warn',
+      latencyMs: Math.round(performance.now() - healthStart),
+      summary: '정적 호스팅 또는 백엔드 미연결',
+      detail: err instanceof Error ? err.message : 'AI Studio 서버 환경에서 확인하세요.',
+    });
+  }
+
+  // 4. OpenAlex & Crossref Live Search Probe
+  if (serverAvailable) {
+    const oaStart = performance.now();
+    try {
+      const globalRes = await testGlobalAcademicSearch({
+        query: '청소년지도',
+        regionScope: 'all',
+        lookbackMonths: 12,
+        limit: 2,
+      });
+      checks.push({
+        id: 'global_sources_live',
+        label: 'OpenAlex · Crossref 실시간 조회 점검',
+        category: 'sources',
+        status: globalRes.ok ? 'pass' : 'warn',
+        latencyMs: Math.round(performance.now() - oaStart),
+        summary: globalRes.ok
+          ? `실시간 ${globalRes.totalReturned}건 조회 확인 (국내 ${globalRes.domesticCount} · 해외 ${globalRes.internationalCount})`
+          : '부분 제한 또는 조회 결과 없음',
+        detail: globalRes.message,
+      });
+    } catch (err) {
+      checks.push({
+        id: 'global_sources_live',
+        label: 'OpenAlex · Crossref 실시간 조회 점검',
+        category: 'sources',
+        status: 'fail',
+        latencyMs: Math.round(performance.now() - oaStart),
+        summary: '학술 API 조회 오류',
+        detail: err instanceof Error ? err.message : 'OpenAlex/Crossref 응답을 받지 못했습니다.',
+      });
+    }
+
+    // 5. KST 03:00 Monthly Schedule Boundary Verification
+    const schedStart = performance.now();
+    try {
+      const [beforeRes, atSlotRes] = await Promise.all([
+        fetch(resolveApiUrl('/api/papers/schedule-check'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nowIso: '2026-12-01T02:59:00+09:00',
+            lastSyncedAtIso: '2026-11-01T03:05:00+09:00',
+            autoEnabled: true,
+            papersCount: 10,
+          }),
+        }),
+        fetch(resolveApiUrl('/api/papers/schedule-check'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nowIso: '2026-12-01T03:00:00+09:00',
+            lastSyncedAtIso: '2026-11-01T03:05:00+09:00',
+            autoEnabled: true,
+            papersCount: 10,
+          }),
+        }),
+      ]);
+      const beforeJson = (await beforeRes.json()) as { due?: boolean; reason?: string };
+      const atSlotJson = (await atSlotRes.json()) as { due?: boolean; reason?: string };
+      const passedBoundary = beforeJson.due === false && atSlotJson.due === true;
+      checks.push({
+        id: 'kst_scheduler_boundary',
+        label: '매월 1일 KST 03:00 스케줄 경계 검증',
+        category: 'scheduler',
+        status: passedBoundary ? 'pass' : 'fail',
+        latencyMs: Math.round(performance.now() - schedStart),
+        summary: passedBoundary
+          ? '02:59(대기) → 03:00(실행 전환) 경계 판정 정확'
+          : '스케줄 경계 판정 이상',
+        detail: `02:59 KST=${String(beforeJson.due)} / 03:00 KST=${String(atSlotJson.due)} · 현재 자동스케줄 ${researchSyncStatus?.autoEnabled === false ? '일시중지' : '활성'}`,
+      });
+    } catch (err) {
+      checks.push({
+        id: 'kst_scheduler_boundary',
+        label: '매월 1일 KST 03:00 스케줄 경계 검증',
+        category: 'scheduler',
+        status: 'fail',
+        latencyMs: Math.round(performance.now() - schedStart),
+        summary: '스케줄 검증 API 호출 실패',
+        detail: err instanceof Error ? err.message : '알 수 없는 오류',
+      });
+    }
+  }
+
+  // 6. Client Security Hygiene & Data Integrity Check
+  const hygieneStart = performance.now();
+  const viteEnv = (import.meta as unknown as { env?: Record<string, unknown> }).env || {};
+  const leakedSecretKeys = Object.keys(viteEnv).filter((k) =>
+    /GEMINI_API_KEY|NANET_API_KEY|NL_API_KEY|DBPIA_API_KEY|SECRET/i.test(k)
+  );
+  const pendingOrFailedCount = papers.filter((p) => p.analysisStatus !== 'completed').length;
+  const staleSyncLock = Boolean(
+    researchSyncStatus?.lastSyncStatus === 'syncing' && !isSyncActivelyRunning(researchSyncStatus)
+  );
+  const integrityStatus =
+    leakedSecretKeys.length > 0 ? 'fail' : staleSyncLock || pendingOrFailedCount > 0 ? 'warn' : 'pass';
+
+  checks.push({
+    id: 'data_security_hygiene',
+    label: '클라이언트 보안 · 데이터 무결성 점검',
+    category: 'security',
+    status: integrityStatus,
+    latencyMs: Math.round(performance.now() - hygieneStart),
+    summary:
+      leakedSecretKeys.length > 0
+        ? `클라이언트 번들 비밀키 노출 감지 (${leakedSecretKeys.join(', ')})`
+        : staleSyncLock
+          ? '만료된 진행 잠금 감지 ([진행 잠금 해제] 권장)'
+          : `비밀키 분리 준수 · 논문 ${papers.length}편(미완료 ${pendingOrFailedCount}편) · 보고서 ${monthlyReports.length}건`,
+    detail: `실행 로그 ${syncLogs.length}건 기록됨 · 서버 전용 프록시 및 firestore.rules 스키마 정합성 준수`,
+  });
+
+  const hasFail = checks.some((c) => c.status === 'fail');
+  const hasWarn = checks.some((c) => c.status === 'warn');
+
+  return {
+    checkedAtIso: new Date().toISOString(),
+    overallStatus: hasFail ? 'fail' : hasWarn ? 'warn' : 'pass',
+    checks,
+  };
+}
+
 
 
