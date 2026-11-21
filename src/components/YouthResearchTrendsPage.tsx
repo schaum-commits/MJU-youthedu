@@ -14,7 +14,6 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { getActiveApiBaseUrl, isLikelyStaticHosting } from '../lib/apiConfig';
 import {
   buildGoogleScholarCategoryUrl,
   buildGoogleScholarPaperUrl,
@@ -31,7 +30,6 @@ import {
   YOUTH_RESEARCH_CATEGORIES,
   YouthResearchCategory,
 } from '../types/community';
-import { CloudRunServerBar } from './CloudRunServerBar';
 import {
   formatKoreanDateTime,
   NotionCallout,
@@ -412,10 +410,6 @@ export function YouthResearchTrendsPage({
           )}
         </div>
       </header>
-
-      {(isAdmin || viewMode === 'dbpia' || (isLikelyStaticHosting() && !getActiveApiBaseUrl())) && (
-        <CloudRunServerBar compact defaultExpanded={isLikelyStaticHosting() && !getActiveApiBaseUrl()} />
-      )}
 
       {isSyncRunning && (
         <div
